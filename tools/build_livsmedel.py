@@ -90,6 +90,15 @@ def main():
             continue
         name_en = en.get(num, "")
         foods.append([num, sv[num], name_en if name_en != sv[num] else ""] + row)
+    if len(foods) < 2000:
+        sys.exit(f"Only {len(foods)} foods came back; keeping the existing file.")
+    if OUT.exists():
+        try:
+            if json.loads(OUT.read_text()).get("foods") == foods:
+                print("No changes; existing file kept.")
+                return 0
+        except ValueError:
+            pass
     payload = {
         "source": "Livsmedelsverkets livsmedelsdatabas",
         "license": "CC BY 4.0",

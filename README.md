@@ -41,7 +41,7 @@ python3 tools/build_livsmedel.py
 python3 tools/build_barcodes_se.py
 ```
 
-Then bump `CACHE` in `sw.js`, commit and push.
+A GitHub Actions workflow (`.github/workflows/refresh-data.yml`) runs both scripts every Monday and commits the result if anything changed. The app picks up new data on its own the next time it's opened; no `CACHE` bump is needed for data files.
 
 ## Credits
 

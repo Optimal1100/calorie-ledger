@@ -80,6 +80,16 @@ def main():
             time.sleep(1)
         if data.get("count", 0) >= 10000 and not data.get("is_count_exact", True):
             print("  WARNING: this slice has more than 10,000 products; some were missed.")
+    if len(products) < 10000:
+        sys.exit(f"Only {len(products)} products came back; keeping the existing file.")
+    products = dict(sorted(products.items()))
+    if OUT.exists():
+        try:
+            if json.loads(OUT.read_text()).get("products") == products:
+                print("No changes; existing file kept.")
+                return 0
+        except ValueError:
+            pass
     payload = {
         "source": "Open Food Facts (Swedish barcodes and products sold in Sweden)", "license": "ODbL", "built": dt.date.today().isoformat(), "per": "100 g",
         "fields": ["name", "kcal", "p", "c", "f", "serving_g", "serving", "fiber", "sugar", "satfat", "sodium_mg"],
