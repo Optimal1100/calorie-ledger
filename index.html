@@ -240,6 +240,32 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
 .label .ln.last{border-bottom:0}
 .label .foot{font:400 11px/1.4 var(--body);padding-top:6px}
 
+/* Review */
+.rv-head{display:flex;align-items:center;gap:16px}
+.score{width:92px;height:92px;flex:none;position:relative}
+.score svg{width:100%;height:100%;transform:rotate(-90deg)}
+.score .track{stroke:var(--line)}
+.score .prog{stroke:var(--accent)}
+.score.mid .prog{stroke:var(--carbs)}
+.score.low .prog{stroke:var(--warn)}
+.score .n{position:absolute;inset:0;display:grid;place-content:center;text-align:center;font:800 28px/1 var(--display)}
+.score .n small{display:block;font:600 10px var(--body);color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-top:3px}
+.rv-head h2{font:800 20px/1.2 var(--display);margin:0;text-wrap:balance}
+.rv-head p{margin:4px 0 0;font-size:12px;color:var(--muted)}
+.rv-sec{display:grid;gap:10px}
+.rv-sec h3{font:700 11px/1 var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0}
+.rv-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.rv-list li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;line-height:1.4}
+.rv-list li::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:7px}
+.gap{background:var(--field);border-radius:14px;padding:12px 14px;display:grid;gap:6px}
+.gap b{font:800 16px/1.2 var(--display)}
+.gap p{margin:0;font-size:14px;line-height:1.45}
+.gap .foods{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.gap .foods span{background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700}
+.next{background:var(--accent-soft);border-radius:14px;padding:14px;line-height:1.45}
+.next b{display:block;font:700 11px/1 var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.stale{background:var(--warn-soft);color:var(--warn);border-radius:12px;padding:10px 12px;font-size:13px;font-weight:600}
+
 /* Settings */
 .stack{display:grid;gap:14px}
 .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
@@ -251,8 +277,8 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
 .credit a{color:inherit}
 
 /* Tab bar */
-.tabbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 10px);width:min(440px,calc(100% - 24px));z-index:40;
-  display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:6px;border-radius:26px;background:var(--bar);
+.tabbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 10px);width:min(480px,calc(100% - 20px));z-index:40;
+  display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:6px;border-radius:26px;background:var(--bar);
   -webkit-backdrop-filter:saturate(1.6) blur(18px);backdrop-filter:saturate(1.6) blur(18px);box-shadow:0 10px 30px rgba(0,0,0,.18),0 0 0 1px var(--line)}
 .tabbar button{border:0;background:none;border-radius:20px;padding:8px 4px 6px;display:grid;justify-items:center;gap:3px;font-size:11px;font-weight:700;color:var(--muted)}
 .tabbar svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
@@ -392,6 +418,27 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
     <section class="label" aria-label="Nutrition facts for the day" id="label"></section>
   </main>
 
+  <!-- REVIEW -->
+  <main class="view" id="view-review" hidden>
+    <section class="card stack">
+      <p class="eyebrow" style="margin:0">Coach setup</p>
+      <div class="field"><label for="rvFocus">What are you optimising for?</label>
+        <select id="rvFocus">
+          <option value="overall energy and health">Overall energy and health</option>
+          <option value="building muscle">Building muscle</option>
+          <option value="losing fat while keeping muscle">Losing fat, keeping muscle</option>
+          <option value="strength training performance">Strength training</option>
+          <option value="endurance training performance">Endurance training</option>
+          <option value="mental focus and steady energy">Mental focus</option>
+        </select>
+      </div>
+      <div class="field"><label for="rvAbout">About you (optional)</label><textarea id="rvAbout" class="note" rows="2" placeholder="e.g. 82 kg, lift 4 times a week, vegetarian, trained legs today"></textarea></div>
+      <button type="button" class="primary wide" id="rvGo">Review my day</button>
+      <div id="rvNoKey" hidden><p class="msg">Reviews need a free Google Gemini key. <button type="button" class="ghost" id="rvGotoKey" style="margin-left:6px">Add your key</button></p></div>
+    </section>
+    <div id="rvOut" class="view" style="animation:none"></div>
+  </main>
+
   <!-- SETTINGS -->
   <main class="view" id="view-settings" hidden>
     <section class="card">
@@ -450,8 +497,9 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
 
 <nav class="tabbar" aria-label="Sections">
   <button type="button" data-tab="today"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Today</button>
-  <button type="button" data-tab="add" class="plus"><span class="bubble"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Add</button>
   <button type="button" data-tab="trends"><svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>Trends</button>
+  <button type="button" data-tab="add" class="plus"><span class="bubble"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Add</button>
+  <button type="button" data-tab="review"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.100 1.900L12 17l-1.900-5.100L5 10l5.100-1.900zM18.500 15.500l.8 2.200 2.200.8-2.200.8-.8 2.200-.8-2.200-2.200-.8 2.200-.8z"/></svg>Review</button>
   <button type="button" data-tab="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Settings</button>
 </nav>
 
@@ -514,16 +562,16 @@ const working = t => `<div class="working"><span class="spin"></span>${esc(t)}</
 const titleCase = s => s.toLowerCase().replace(/(^|[\s,(\/-])([a-z])/g, (m,a,b) => a + b.toUpperCase());
 
 // ---------- storage (this device) ----------
-const state = { settings:{...DEFAULTS}, days:{}, barcodes:{}, date:keyOf(new Date()) };
+const state = { settings:{...DEFAULTS}, days:{}, barcodes:{}, coach:{focus:"overall energy and health", about:""}, reviews:{}, date:keyOf(new Date()) };
 let keys = {gemini:"", anthropic:"", usda:""};
 const hasAI = () => !!(keys.gemini || keys.anthropic);
 try {
   const raw = localStorage.getItem(LS_KEY);
-  if (raw) { const o = JSON.parse(raw); state.settings = {...DEFAULTS, ...(o.settings||{})}; state.days = o.days || {}; state.barcodes = o.barcodes || {}; }
+  if (raw) { const o = JSON.parse(raw); state.settings = {...DEFAULTS, ...(o.settings||{})}; state.days = o.days || {}; state.barcodes = o.barcodes || {}; state.coach = {...state.coach, ...(o.coach||{})}; state.reviews = o.reviews || {}; }
   const k = localStorage.getItem(KEYS_KEY); if (k) keys = {...keys, ...JSON.parse(k)};
 } catch {}
 function persist(){
-  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes})); }
+  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews})); }
   catch { toast("Couldn't save. Your device storage may be full."); }
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
@@ -549,7 +597,7 @@ function defaultMeal(){
 const mealName = () => MEALS.find(m => m[0] === $("fMeal").value)[1];
 
 // ---------- views ----------
-const VIEW_TITLES = {today:"Calorie Ledger", add:"Add food", trends:"Trends", settings:"Settings"};
+const VIEW_TITLES = {today:"Calorie Ledger", add:"Add food", trends:"Trends", review:"Review", settings:"Settings"};
 function show(v, keepScroll){
   if (!VIEW_TITLES[v]) v = "today";
   document.body.dataset.view = v;
@@ -608,7 +656,7 @@ function render(){
     return `<section class="mealcard"><div class="meal-head"><span class="meal-ico"><svg viewBox="0 0 24 24">${MEAL_ICONS[k]}</svg></span><div class="grow"><h3>${n}</h3><div class="sub num">${list.length ? `${fmt(mt.kcal)} kcal · ${list.length} ${list.length===1?"item":"items"}` : "Nothing logged yet"}</div></div><button class="add" data-meal="${k}" aria-label="Add to ${n}">+</button></div>${list.length ? `<ul class="entries">${items}</ul>` : ""}</section>`;
   }).join("");
 
-  renderChips(); renderWeek(); updateAddBtn(); renderDataInfo();
+  renderChips(); renderWeek(); updateAddBtn(); renderDataInfo(); renderReview();
 }
 
 function renderChips(){
@@ -891,7 +939,7 @@ $("meals").addEventListener("click", e => {
   if (a) { $("fMeal").value = a.dataset.meal; updateAddBtn(); show("add"); $("fName").focus(); }
 });
 $("chart").addEventListener("click", e => { const b = e.target.closest("[data-day]"); if (b) { state.date = b.dataset.day; render(); show("today"); } });
-$("prev").addEventListener("click", () => { state.date = shift(state.date,-1); render(); });
+$("prev").addEventListener("click", () => { state.date = shift(state.date,-1); rvError = ""; render(); });
 $("next").addEventListener("click", () => { if (state.date < keyOf(new Date())) { state.date = shift(state.date,1); render(); } });
 $("today").addEventListener("click", () => { state.date = keyOf(new Date()); $("fMeal").value = defaultMeal(); render(); });
 // Coming back to the app on a new day should land on today.
@@ -1072,6 +1120,7 @@ $("bcCode").addEventListener("keydown", e => { if (e.key === "Enter") { e.preven
 
 // --- AI vision: Google Gemini (free tier) by default, or Claude when an Anthropic key is set ---
 const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"];
+// `file` is an image to look at, or null for a text-only request.
 async function aiJSON(file, prompt, schema, signal){
   if (keys.anthropic) return claudeJSON(file, prompt, schema, signal);
   if (keys.gemini) return geminiJSON(file, prompt, schema, signal);
@@ -1086,9 +1135,9 @@ function geminiSchema(x){
   return out;
 }
 async function geminiJSON(file, prompt, schema, signal){
-  const image = await toJpegBase64(file, 1568);
+  const parts = file ? [{inline_data: {mime_type: "image/jpeg", data: await toJpegBase64(file, 1568)}}, {text: prompt}] : [{text: prompt}];
   const body = JSON.stringify({
-    contents: [{role: "user", parts: [{inline_data: {mime_type: "image/jpeg", data: image}}, {text: prompt}]}],
+    contents: [{role: "user", parts}],
     generationConfig: {responseMimeType: "application/json", responseSchema: geminiSchema(schema)}
   });
   // The newest free model is often overloaded, so retry once and then fall back to the next model.
@@ -1122,7 +1171,8 @@ async function geminiJSON(file, prompt, schema, signal){
 }
 let AnthropicSDK = null;
 async function claudeJSON(file, prompt, schema, signal){
-  const image = await toJpegBase64(file, 1568);
+  const content = [{type: "text", text: prompt}];
+  if (file) content.unshift({type: "image", source: {type: "base64", media_type: "image/jpeg", data: await toJpegBase64(file, 1568)}});
   if (!AnthropicSDK) {
     try { AnthropicSDK = (await import(SDK_URL)).default; } catch { throw {kind:"offline"}; }
   }
@@ -1135,10 +1185,7 @@ async function claudeJSON(file, prompt, schema, signal){
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       output_config: {effort: "medium", format: {type: "json_schema", schema}},
-      messages: [{role: "user", content: [
-        {type: "image", source: {type: "base64", media_type: "image/jpeg", data: image}},
-        {type: "text", text: prompt}
-      ]}]
+      messages: [{role: "user", content}]
     }, {signal});
   } catch (e) {
     if (signal && signal.aborted) throw {kind:"cancelled"};
@@ -1162,8 +1209,8 @@ function aiErrorCopy(e){
       return "Couldn't reach Gemini. Check your connection and try again.";
     }
     case "offline": return "You're offline. AI estimates need an internet connection.";
-    case "refused": return "The AI declined to analyze that image. Try a different photo.";
-    case "truncated": case "badjson": return "Couldn't get a usable estimate from that photo. Try again or use a clearer shot.";
+    case "refused": return "The AI declined that request. Try again, or change what you sent.";
+    case "truncated": case "badjson": return "Couldn't get a usable answer that time. Try again.";
     case "api":
       if (e.status === 401) return "Your Anthropic API key was rejected. Check it in Settings.";
       if (e.status === 403) return "Your Anthropic API key doesn't have access to this model.";
@@ -1307,6 +1354,82 @@ $("mealOut").addEventListener("click", e => {
   $("mealNote").value = ""; setMealMsg("Logged. Snap another meal any time.", "ok"); refreshPhotoUI();
 });
 
+// ---------- review: an AI coach reads the day's log ----------
+const REVIEW_SCHEMA = {type:"object", additionalProperties:false, required:["score","headline","wins","gaps","next"],
+  properties:{
+    score:{type:"integer"}, headline:{type:"string"},
+    wins:{type:"array", items:{type:"string"}},
+    gaps:{type:"array", items:{type:"object", additionalProperties:false, required:["name","why","foods"],
+      properties:{name:{type:"string"}, why:{type:"string"}, foods:{type:"array", items:{type:"string"}}}}},
+    next:{type:"string"}}};
+let rvCtl = null, rvError = "";
+const dayStamp = k => entriesFor(k).map(e => `${e.id}:${e.kcal}`).join("|") + "#" + JSON.stringify(state.settings) + state.coach.focus + state.coach.about;
+function dayName(k){
+  const diff = Math.round((parseKey(keyOf(new Date())) - parseKey(k)) / 864e5);
+  return diff === 0 ? "today" : diff === 1 ? "yesterday" : parseKey(k).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
+}
+function renderReview(){
+  const es = entriesFor(state.date), rv = state.reviews[state.date];
+  if (document.activeElement !== $("rvFocus")) $("rvFocus").value = state.coach.focus;
+  if (document.activeElement !== $("rvAbout")) $("rvAbout").value = state.coach.about;
+  $("rvNoKey").hidden = hasAI();
+  $("rvGo").disabled = !es.length || !hasAI() || !!rvCtl;
+  $("rvGo").textContent = rvCtl ? "Reviewing…" : rv ? `Review ${dayName(state.date)} again` : `Review ${dayName(state.date)}`;
+  let html = "";
+  if (rvCtl) html = `<section class="card">${working("Reading your day… this takes a few seconds.")}</section>`;
+  else if (rvError) html = `<section class="card"><p class="msg err">${esc(rvError)}</p></section>`;
+  else if (!es.length) html = `<section class="card"><p class="msg">Nothing is logged for ${esc(dayName(state.date))} yet. Log what you ate, then come back for feedback on what's missing.</p></section>`;
+  if (rv && !rvCtl) {
+    const r = rv.result, sc = Math.max(0, Math.min(100, Math.round(+r.score || 0))), C = 2*Math.PI*40;
+    const stale = rv.stamp !== dayStamp(state.date);
+    html += `<section class="card stack">
+      ${stale ? `<div class="stale">Your log or targets changed since this review. Run it again for fresh feedback.</div>` : ""}
+      <div class="rv-head">
+        <div class="score ${sc < 50 ? "low" : sc < 75 ? "mid" : ""}"><svg viewBox="0 0 100 100"><circle class="track" cx="50" cy="50" r="40" fill="none" stroke-width="9"/><circle class="prog" cx="50" cy="50" r="40" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C*(1-sc/100)).toFixed(1)}"/></svg><div class="n num">${sc}<small>of 100</small></div></div>
+        <div><h2>${esc(r.headline || "")}</h2><p>For ${esc(rv.focus)} · reviewed ${esc(new Date(rv.at).toLocaleTimeString(undefined,{hour:"numeric", minute:"2-digit"}))}</p></div>
+      </div>
+      ${(r.gaps||[]).length ? `<div class="rv-sec"><h3>What's missing</h3>${r.gaps.map(x => `<div class="gap"><b>${esc(x.name)}</b><p>${esc(x.why)}</p>${(x.foods||[]).length ? `<div class="foods">${x.foods.slice(0,5).map(f => `<span>${esc(f)}</span>`).join("")}</div>` : ""}</div>`).join("")}</div>` : ""}
+      ${r.next ? `<div class="next"><b>Eat next</b>${esc(r.next)}</div>` : ""}
+      ${(r.wins||[]).length ? `<div class="rv-sec"><h3>Going well</h3><ul class="rv-list">${r.wins.map(w => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
+      <p class="hint">AI feedback based only on what you logged. Vitamins, minerals and fibre are inferred from food names, so treat them as estimates. This is general guidance, not medical advice.</p>
+    </section>`;
+  }
+  $("rvOut").innerHTML = html;
+}
+function reviewPrompt(k){
+  const s = state.settings, es = entriesFor(k), t = totals(es);
+  const lines = MEALS.map(([mk,mn]) => {
+    const list = es.filter(e => e.meal === mk);
+    return `${mn}: ${list.length ? list.map(e => `${e.name} (${e.kcal} kcal, P ${e.p||0} g, C ${e.c||0} g, F ${e.f||0} g)`).join("; ") : "nothing logged"}`;
+  }).join("\n");
+  const isToday = k === keyOf(new Date());
+  return `You are a sports nutrition coach reviewing one day of a person's food log. Their focus is: ${state.coach.focus}.` +
+    (state.coach.about.trim() ? ` About them: "${state.coach.about.trim().slice(0,400)}".` : "") +
+    `\n\nDaily targets: ${s.goal} kcal, ${s.p} g protein, ${s.c} g carbohydrate, ${s.f} g fat.` +
+    `\nLogged ${isToday ? `so far today (local time now ${new Date().toLocaleTimeString(undefined,{hour:"numeric", minute:"2-digit"})})` : "for this past day"}:\n${lines}` +
+    `\nTotals: ${Math.round(t.kcal)} kcal, ${r1(t.p)} g protein, ${r1(t.c)} g carbohydrate, ${r1(t.f)} g fat.` +
+    `\n\nJudge the day against their focus for peak physical and mental performance. Consider calories and macros against the targets, protein spread across meals, fibre, fruit and vegetable variety, likely micronutrient gaps (for example iron, calcium, magnesium, potassium, vitamin D, B12, omega-3), hydration cues, and how processed the foods are. You only know what is logged, so infer sensibly from the food names and say "likely" where you are inferring.` +
+    `\n\nReturn: score (0-100 for how well the day supports their focus${isToday ? ", judged for this point in the day" : ""}); headline (one plain sentence, under 14 words); wins (2-3 short specific things that went well; fewer if the day is thin); gaps (the 2-4 most important things missing or overdone, most important first, each with a short name, a one-or-two-sentence why tied to performance, and 2-4 specific foods that would fix it); next (one or two sentences: ${isToday ? "the best thing to eat for the rest of today, with rough amounts" : "what to change tomorrow"}). Be direct and specific to the foods they logged. Do not give medical advice or mention supplements unless food alone clearly cannot cover it.`;
+}
+$("rvGo").addEventListener("click", async () => {
+  const k = state.date;
+  if (!entriesFor(k).length || !hasAI() || rvCtl) return;
+  rvCtl = new AbortController(); rvError = ""; renderReview();
+  try {
+    const stamp = dayStamp(k), focus = state.coach.focus;
+    const result = await aiJSON(null, reviewPrompt(k), REVIEW_SCHEMA, rvCtl.signal);
+    state.reviews[k] = {at: Date.now(), stamp, focus, result};
+    // Keep the last 60 reviews so storage stays small.
+    Object.keys(state.reviews).sort().slice(0, -60).forEach(x => delete state.reviews[x]);
+    persist();
+  } catch (err) {
+    rvError = err && err.kind === "cancelled" ? "" : aiErrorCopy(err);
+  } finally { rvCtl = null; renderReview(); }
+});
+$("rvFocus").addEventListener("change", () => { state.coach.focus = $("rvFocus").value; persist(); renderReview(); });
+$("rvAbout").addEventListener("change", () => { state.coach.about = $("rvAbout").value; persist(); renderReview(); });
+$("rvGotoKey").addEventListener("click", () => { show("settings", true); $("keysCard").scrollIntoView({behavior:"smooth", block:"center"}); $("kGemini").focus({preventScroll:true}); });
+
 // ---------- settings ----------
 $("targetForm").addEventListener("submit", e => {
   e.preventDefault();
@@ -1323,7 +1446,7 @@ function renderKeys(){
   $("kState").className = "keystate " + (hasAI() ? "on" : "off");
   refreshPhotoUI();
 }
-function saveKeys(){ try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch {} renderKeys(); }
+function saveKeys(){ try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch {} renderKeys(); renderReview(); }
 $("keyForm").addEventListener("submit", e => {
   e.preventDefault();
   keys = {gemini:$("kGemini").value.trim(), anthropic:$("kAnthropic").value.trim(), usda:$("kUsda").value.trim()};
@@ -1332,7 +1455,7 @@ $("keyForm").addEventListener("submit", e => {
 $("clearKeys").addEventListener("click", () => { keys = {gemini:"", anthropic:"", usda:""}; saveKeys(); toast("Keys removed from this device"); });
 
 $("exportBtn").addEventListener("click", async () => {
-  const blob = new Blob([JSON.stringify({app:"calorie-ledger", version:1, exported:new Date().toISOString(), settings:state.settings, days:state.days, barcodes:state.barcodes}, null, 1)], {type:"application/json"});
+  const blob = new Blob([JSON.stringify({app:"calorie-ledger", version:1, exported:new Date().toISOString(), settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews}, null, 1)], {type:"application/json"});
   const name = `calorie-ledger-${keyOf(new Date())}.json`;
   const file = new File([blob], name, {type:"application/json"});
   if (navigator.canShare && navigator.canShare({files:[file]})) {
@@ -1355,6 +1478,8 @@ $("importFile").addEventListener("change", async e => {
     }
     if (o.settings) state.settings = {...DEFAULTS, ...o.settings};
     if (o.barcodes) state.barcodes = {...o.barcodes, ...state.barcodes};
+    if (o.reviews) state.reviews = {...o.reviews, ...state.reviews};
+    if (o.coach) state.coach = {...state.coach, ...o.coach};
     persist(); fillTargets(); render();
     $("dataMsg").className = "msg ok"; $("dataMsg").textContent = `Imported ${added} ${added===1?"entry":"entries"}. Entries you already had were kept.`;
   } catch {
