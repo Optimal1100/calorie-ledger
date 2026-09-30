@@ -223,6 +223,20 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
 .chart .b.sel{opacity:1}
 .chart .dl.sel{fill:var(--ink);font-weight:700}
 
+/* Micronutrients */
+.micro-grid{display:grid;gap:12px}
+.mrow{display:grid;gap:5px}
+.mrow .mtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:14px}
+.mrow .mtop b{font-weight:700}
+.mrow .mtop span{color:var(--muted);font-size:13px}
+.mrow .mtop .pc{font:800 13px/1 var(--display);color:var(--ink);margin-left:8px}
+.mbar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.mbar i{display:block;height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease}
+.mrow.lowish .mbar i{background:var(--carbs)}
+.mrow.over .mbar i{background:var(--warn)}
+.mrow.over .pc{color:var(--warn)}
+.msub{font:700 11px/1 var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:8px 0 0}
+
 /* Nutrition Facts label */
 .label{background:var(--card);border:2px solid var(--ink);padding:8px 12px 12px;font-family:var(--display);color:var(--ink);border-radius:4px}
 .label h2{font:900 38px/1 var(--display);font-stretch:70%;margin:0;letter-spacing:-.01em}
@@ -415,6 +429,10 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
       </div>
       <div class="chart" id="chart"></div>
     </section>
+    <section class="card">
+      <div class="week-head"><p class="eyebrow" style="margin:0">Micronutrients</p><span class="avg" id="microDay"></span></div>
+      <div id="micros2"></div>
+    </section>
     <section class="label" aria-label="Nutrition facts for the day" id="label"></section>
   </main>
 
@@ -475,7 +493,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
           <input id="kUsda" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the shared demo key">
         </div>
         <div class="row-btns"><button class="primary" type="submit">Save keys</button><button class="ghost" type="button" id="clearKeys">Remove keys</button></div>
-        <span class="hint">Keys stay on this device and are sent only to the service they belong to. Get a free Gemini key at aistudio.google.com/apikey (no card needed). On the free tier, Google may use your photos to improve its products. The demo USDA key allows about 30 searches an hour; a free personal key from api.data.gov raises that.</span>
+        <span class="hint">Keys stay on this device and are sent only to the service they belong to. Get a free Gemini key at aistudio.google.com/apikey (no card needed). On the free tier, Google may use your photos to improve its products. Food search works without a USDA key, but the shared one only allows a handful of searches an hour; a free personal key from api.data.gov/signup allows 1,000.</span>
       </form>
     </section>
 
@@ -541,6 +559,16 @@ const MEAL_ICONS = {
   dinner:'<path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z"/>',
   snacks:'<path d="M12 8c-2-1.6-6-1-6 3.5 0 4 2.6 7.5 4.4 7.5.8 0 1-.5 1.6-.5s.8.5 1.6.5c1.800 0 4.400-3.500 4.400-7.500C18 7 14 6.400 12 8zM12 8c0-2 1-3.500 2.500-4"/>'
 };
+// Micronutrients tracked per entry: [key, label, unit, daily reference (FDA Daily Values for adults), kind, AI field name]
+const MICROS = [
+  ["fiber","Fibre","g",28,"min","fiber_g"], ["potassium","Potassium","mg",4700,"min","potassium_mg"], ["calcium","Calcium","mg",1300,"min","calcium_mg"],
+  ["iron","Iron","mg",18,"min","iron_mg"], ["magnesium","Magnesium","mg",420,"min","magnesium_mg"], ["zinc","Zinc","mg",11,"min","zinc_mg"],
+  ["vitc","Vitamin C","mg",90,"min","vitamin_c_mg"], ["vitd","Vitamin D","µg",20,"min","vitamin_d_mcg"], ["b12","Vitamin B12","µg",2.4,"min","vitamin_b12_mcg"],
+  ["vita","Vitamin A","µg",900,"min","vitamin_a_mcg_rae"], ["folate","Folate","µg",400,"min","folate_mcg_dfe"], ["omega3","Omega-3","g",1.6,"min","omega3_g"],
+  ["sodium","Sodium","mg",2300,"max","sodium_mg"], ["satfat","Saturated fat","g",20,"max","saturated_fat_g"], ["sugar","Sugars","g",null,"info","sugars_g"]
+].map(([key,label,unit,ref,kind,ai]) => ({key,label,unit,ref,kind,ai}));
+const MICRO_PROPS = Object.fromEntries(MICROS.map(m => [m.ai, {type:"number"}]));
+const MICRO_REQ = MICROS.map(m => m.ai);
 const LS_KEY = "calorie-ledger-v1", KEYS_KEY = "calorie-ledger-keys";
 const AI_MODEL = "claude-opus-5-5";
 const SDK_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.129.0/+esm";
@@ -596,6 +624,71 @@ function defaultMeal(){
 }
 const mealName = () => MEALS.find(m => m[0] === $("fMeal").value)[1];
 
+// ---------- micronutrients ----------
+const mnum = v => Math.round((+v || 0) * 100) / 100;
+const scaleMicros = (m, k) => m ? Object.fromEntries(Object.entries(m).filter(([,v]) => v != null).map(([key,v]) => [key, mnum(v * k)])) : undefined;
+const missingMicros = e => MICROS.filter(m => !(e.m && e.m[m.key] != null)).map(m => m.key);
+const microTotals = es => Object.fromEntries(MICROS.map(m => [m.key, es.reduce((a,e) => a + (+(e.m && e.m[m.key]) || 0), 0)]));
+const fromAIMicros = o => Object.fromEntries(MICROS.map(m => [m.key, Math.max(0, mnum(o && o[m.ai]))]));
+const mfmt = (v, unit) => (v >= 100 ? Math.round(v) : v >= 10 ? Math.round(v*10)/10 : Math.round(v*100)/100).toLocaleString() + " " + unit;
+function renderMicros(){
+  const es = entriesFor(state.date), t = microTotals(es);
+  const need = es.filter(e => missingMicros(e).length).length, est = es.filter(e => e.mEst).length;
+  $("microDay").textContent = dayName(state.date);
+  if (!es.length) { $("micros2").innerHTML = `<p class="msg">Log food to see fibre, vitamins and minerals for the day.</p>`; return; }
+  const row = m => {
+    const v = t[m.key], pc = m.ref ? Math.round(v / m.ref * 100) : null;
+    const cls = m.kind === "max" ? (pc > 100 ? "over" : "") : m.kind === "min" ? (pc < 50 ? "lowish" : "") : "";
+    return `<div class="mrow ${cls}"><div class="mtop"><b>${m.label}</b><span class="num">${mfmt(v, m.unit)}${m.ref ? ` / ${m.ref.toLocaleString()} ${m.unit}<span class="pc">${pc}%</span>` : ""}</span></div>${m.ref ? `<div class="mbar"><i style="width:${Math.min(pc,100)}%"></i></div>` : ""}</div>`;
+  };
+  let status = "";
+  if (enrichBusy) status = working("Estimating micronutrients for your foods…");
+  else if (need && !hasAI()) status = `<p class="msg">${need} ${need===1?"food has":"foods have"} incomplete micronutrient data. Add a free Gemini key in Settings and the app will estimate the rest.</p>`;
+  else if (need && enrichErr) status = `<p class="msg err">${esc(enrichErr)}</p><button type="button" class="ghost" id="enrichRetry">Try again</button>`;
+  else if (need) status = `<button type="button" class="ghost" id="enrichRetry">Estimate missing micronutrients</button>`;
+  $("micros2").innerHTML = `<div class="micro-grid">${status}
+    <p class="msub" style="margin-top:0">Aim to reach</p>${MICROS.filter(m => m.kind === "min").map(row).join("")}
+    <p class="msub">Aim to stay under</p>${MICROS.filter(m => m.kind !== "min").map(row).join("")}
+    <p class="hint">Targets are standard adult daily values. ${est ? `Values for ${est} of ${es.length} ${es.length===1?"food":"foods"} include AI estimates; the rest come from food databases or labels.` : "Values come from food databases and labels."} Treat them as approximate.</p></div>`;
+}
+const MICRO_FILL_SCHEMA = {type:"object", additionalProperties:false, required:["items"], properties:{items:{type:"array",
+  items:{type:"object", additionalProperties:false, required:["n", ...MICRO_REQ], properties:{n:{type:"integer"}, ...MICRO_PROPS}}}}};
+let enrichBusy = false, enrichErr = "", enrichTimer = null;
+function queueEnrich(force){
+  if (force) enrichErr = "";
+  clearTimeout(enrichTimer);
+  enrichTimer = setTimeout(() => enrichDay(state.date), force ? 0 : 1200);
+}
+// Ask the AI to fill in whatever micronutrients a day's entries are missing, in one request.
+async function enrichDay(k){
+  if (!hasAI() || enrichBusy || enrichErr) return;
+  const need = entriesFor(k).filter(e => missingMicros(e).length).slice(0, 25);
+  if (!need.length) return;
+  enrichBusy = true; renderMicros();
+  try {
+    const lines = need.map((e,i) => {
+      const known = MICROS.filter(m => e.m && e.m[m.key] != null).map(m => `${m.ai}=${e.m[m.key]}`).join(", ");
+      return `${i+1}. ${e.name} | ${e.kcal} kcal, protein ${e.p||0} g, carbs ${e.c||0} g, fat ${e.f||0} g${known ? ` | known: ${known}` : ""}`;
+    }).join("\n");
+    const r = await aiJSON(null,
+      "Estimate the micronutrients in each food entry below, for the amount actually eaten. The calories and macros given are for that amount, so use them to judge the portion size. " +
+      "Base the numbers on standard food composition data (such as USDA). Where a value is listed as known, return that same value. Use 0 only when the food truly contains essentially none. " +
+      "Units: grams for fibre, sugars, saturated fat and omega-3 (ALA+EPA+DHA); milligrams for sodium, potassium, calcium, iron, magnesium, zinc and vitamin C; micrograms for vitamin D, vitamin B12, vitamin A (RAE) and folate (DFE). " +
+      "Return one item per entry, with n set to the entry's number.\n\n" + lines, MICRO_FILL_SCHEMA);
+    (r.items || []).forEach(it => {
+      const e = need[(+it.n || 0) - 1]; if (!e) return;
+      const est = fromAIMicros(it); e.m = e.m || {};
+      missingMicros(e).forEach(key => { e.m[key] = est[key]; });
+      e.mEst = true;
+      // Remember per-serving values so quick-adding this food again needs no new estimate.
+      if (e.base) { const q = e.base.qty, mult = q ? q.amount * q.factor : 1; if (mult > 0) { e.base.m = scaleMicros(e.m, 1 / mult); e.base.mEst = true; } }
+    });
+    persist();
+  } catch (err) { enrichErr = aiErrorCopy(err); }
+  finally { enrichBusy = false; render(); }
+}
+document.addEventListener("click", e => { if (e.target.id === "enrichRetry") queueEnrich(true); });
+
 // ---------- views ----------
 const VIEW_TITLES = {today:"Calorie Ledger", add:"Add food", trends:"Trends", review:"Review", settings:"Settings"};
 function show(v, keepScroll){
@@ -605,6 +698,7 @@ function show(v, keepScroll){
   document.querySelectorAll(".tabbar button").forEach(b => b.dataset.tab === v ? b.setAttribute("aria-current","page") : b.removeAttribute("aria-current"));
   $("viewTitle").textContent = VIEW_TITLES[v];
   if (!keepScroll) window.scrollTo(0, 0);
+  if (v === "trends" || v === "review") queueEnrich();
   try { history.replaceState(null, "", "#" + v); } catch {}
 }
 document.querySelector(".tabbar").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) show(b.dataset.tab); });
@@ -656,7 +750,7 @@ function render(){
     return `<section class="mealcard"><div class="meal-head"><span class="meal-ico"><svg viewBox="0 0 24 24">${MEAL_ICONS[k]}</svg></span><div class="grow"><h3>${n}</h3><div class="sub num">${list.length ? `${fmt(mt.kcal)} kcal · ${list.length} ${list.length===1?"item":"items"}` : "Nothing logged yet"}</div></div><button class="add" data-meal="${k}" aria-label="Add to ${n}">+</button></div>${list.length ? `<ul class="entries">${items}</ul>` : ""}</section>`;
   }).join("");
 
-  renderChips(); renderWeek(); updateAddBtn(); renderDataInfo(); renderReview();
+  renderChips(); renderWeek(); renderMicros(); updateAddBtn(); renderDataInfo(); renderReview();
 }
 
 function renderChips(){
@@ -771,11 +865,12 @@ function addEntry(food, q, meal){
   const m = q.amount * q.factor, extra = qtyText(q);
   const e = {id:uid(), name: extra ? `${food.name} · ${extra}` : food.name, meal,
     kcal:Math.round(food.kcal*m), p:r1(food.p*m), c:r1(food.c*m), f:r1(food.f*m),
-    base:{name:food.name, kcal:food.kcal, p:food.p, c:food.c, f:food.f, unit:food.unit || "serving", portions:food.portions || [], qty:q, source:food.source || ""},
+    base:{name:food.name, kcal:food.kcal, p:food.p, c:food.c, f:food.f, unit:food.unit || "serving", portions:food.portions || [], qty:q, source:food.source || "", m:food.m, mEst:food.mEst},
     t:Date.now()};
+  if (food.m) { e.m = scaleMicros(food.m, m); if (food.mEst) e.mEst = true; }
   const day = state.date;
   state.days[day] = [...entriesFor(day), e];
-  persist(); render(); show("today");
+  persist(); render(); show("today"); enrichErr = ""; queueEnrich();
   toast(`Added ${e.name} · ${fmt(e.kcal)} kcal`, () => removeEntry(e.id, true, day));
 }
 function removeEntry(id, silent, date = state.date){
@@ -838,10 +933,11 @@ async function searchOnline(){
   const ctl = searchCtl = new AbortController();
   const box = $("suggest");
   box.innerHTML = working(`Searching for “${q}”…`); box.hidden = false;
-  const [generic, branded] = await Promise.all([
-    searchUSDA(q, ["Foundation","SR Legacy","Survey (FNDDS)"], 8, ctl.signal),
-    searchUSDA(q, ["Branded"], 8, ctl.signal)]);
+  // One request for all food types keeps within USDA's hourly search allowance.
+  const all = await searchUSDA(q, ["Foundation","SR Legacy","Survey (FNDDS)","Branded"], 25, ctl.signal);
   if (ctl.signal.aborted) return;
+  const generic = {items: all.items.filter(f => !f.branded).slice(0, 8), error: all.error};
+  const branded = {items: all.items.filter(f => f.branded).slice(0, 8)};
   const list = [...generic.items, ...branded.items];
   box._foods = list;
   const asRows = (items, off) => suggestButtons(items.map(f => ({f, tag:""})), off);
@@ -868,7 +964,7 @@ async function searchUSDA(q, dataType, pageSize, signal){
     return {items:(data.foods || []).map(fromUSDA).filter(Boolean)};
   } catch (e) {
     if (signal && signal.aborted) return {items:[]};
-    if (e && e.limit) return {items:[], error:"USDA search limit reached for now. Add a free USDA key in Settings, or try again in an hour."};
+    if (e && e.limit) return {items:[], error:"The shared USDA search key has hit its hourly limit. Get your own free key at api.data.gov/signup and paste it in Settings, or try again in an hour."};
     return {items:[], error: e && e.http ? "USDA search is unavailable right now." : "Couldn't reach USDA. Check your connection."};
   }
 }
@@ -886,7 +982,13 @@ function fromUSDA(f){
   const brand = branded ? titleCase(f.brandName || f.brandOwner || "") : "";
   let name = titleCase(f.description);
   if (brand && !name.toLowerCase().includes(brand.toLowerCase())) name = `${brand} ${name}`;
-  return {name, kcal, p:n("203",1003)||0, c:n("205",1005)||0, f:n("204",1004)||0, unit:"100 g", portions, source:"USDA"};
+  const m = {}, put = (key, v) => { if (v != null) m[key] = mnum(v); };
+  put("fiber", n("291",1079)); put("sugar", n("269",2000)); put("satfat", n("606",1258)); put("sodium", n("307",1093)); put("potassium", n("306",1092));
+  put("calcium", n("301",1087)); put("iron", n("303",1089)); put("magnesium", n("304",1090)); put("zinc", n("309",1095)); put("vitc", n("401",1162));
+  put("vitd", n("328",1114)); put("b12", n("418",1178)); put("vita", n("320",1106)); put("folate", n("435",1190) ?? n("417",1177));
+  const ala = n("851",1404) ?? n("619",1270), lc = [n("629",1278), n("621",1272), n("631",1280)];
+  if (ala != null || lc.some(v => v != null)) put("omega3", (ala || 0) + lc.reduce((a,v) => a + (v || 0), 0));
+  return {name, kcal, p:n("203",1003)||0, c:n("205",1005)||0, f:n("204",1004)||0, unit:"100 g", portions, source:"USDA", m, branded};
 }
 function fromOFF(p){
   if (!p) return null;
@@ -896,14 +998,22 @@ function fromOFF(p){
   if (!pname && !brand) return null;
   const name = (brand && !pname.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${pname}` : pname || brand).trim();
   const servG = parseFloat(p.serving_quantity);
+  // Open Food Facts stores minerals and vitamins in grams.
+  const offMicros = sfx => {
+    const m = {}, put = (key, field, mul) => { const v = n[field + sfx]; if (typeof v === "number") m[key] = mnum(v * mul); };
+    put("fiber","fiber",1); put("sugar","sugars",1); put("satfat","saturated-fat",1); put("omega3","omega-3-fat",1);
+    put("sodium","sodium",1e3); put("potassium","potassium",1e3); put("calcium","calcium",1e3); put("iron","iron",1e3); put("magnesium","magnesium",1e3); put("zinc","zinc",1e3); put("vitc","vitamin-c",1e3);
+    put("vitd","vitamin-d",1e6); put("b12","vitamin-b12",1e6); put("vita","vitamin-a",1e6); put("folate","vitamin-b9",1e6);
+    return m;
+  };
   let kcal100 = n["energy-kcal_100g"];
   if (kcal100 == null && n["energy_100g"] != null) kcal100 = n["energy_100g"] / 4.184;
   if (kcal100 != null) {
     return {name, kcal:kcal100, p:n.proteins_100g||0, c:n.carbohydrates_100g||0, f:n.fat_100g||0, unit:"100 g",
-      portions: servG > 0 ? [{label: p.serving_size && /\d/.test(p.serving_size) ? String(p.serving_size) : `serving (${Math.round(servG)} g)`, g:servG}] : [], source:"Open Food Facts"};
+      portions: servG > 0 ? [{label: p.serving_size && /\d/.test(p.serving_size) ? String(p.serving_size) : `serving (${Math.round(servG)} g)`, g:servG}] : [], source:"Open Food Facts", m:offMicros("_100g")};
   }
   if (n["energy-kcal_serving"] != null) {
-    return {name: name + (p.serving_size ? ` (${p.serving_size})` : ""), kcal:n["energy-kcal_serving"], p:n.proteins_serving||0, c:n.carbohydrates_serving||0, f:n.fat_serving||0, unit:"serving", source:"Open Food Facts"};
+    return {name: name + (p.serving_size ? ` (${p.serving_size})` : ""), kcal:n["energy-kcal_serving"], p:n.proteins_serving||0, c:n.carbohydrates_serving||0, f:n.fat_serving||0, unit:"serving", source:"Open Food Facts", m:offMicros("_serving")};
   }
   return null;
 }
@@ -1231,13 +1341,13 @@ async function toJpegBase64(file, maxSide){
 }
 const NUMS = {kcal:{type:"number"}, protein_g:{type:"number"}, carbs_g:{type:"number"}, fat_g:{type:"number"}};
 const LABEL_SCHEMA = {type:"object", additionalProperties:false,
-  required:["found","name","serving","serving_grams","kcal","protein_g","carbs_g","fat_g","source"],
-  properties:{found:{type:"boolean"}, name:{type:"string"}, serving:{type:"string"}, serving_grams:{type:"number"}, ...NUMS,
+  required:["found","name","serving","serving_grams","kcal","protein_g","carbs_g","fat_g","source", ...MICRO_REQ],
+  properties:{found:{type:"boolean"}, name:{type:"string"}, serving:{type:"string"}, serving_grams:{type:"number"}, ...NUMS, ...MICRO_PROPS,
     source:{type:"string", enum:["label","estimate","none"]}}};
 const MEAL_SCHEMA = {type:"object", additionalProperties:false, required:["items","confidence","notes"],
   properties:{
-    items:{type:"array", items:{type:"object", additionalProperties:false, required:["name","portion","kcal","protein_g","carbs_g","fat_g"],
-      properties:{name:{type:"string"}, portion:{type:"string"}, ...NUMS}}},
+    items:{type:"array", items:{type:"object", additionalProperties:false, required:["name","portion","kcal","protein_g","carbs_g","fat_g", ...MICRO_REQ],
+      properties:{name:{type:"string"}, portion:{type:"string"}, ...NUMS, ...MICRO_PROPS}}},
     confidence:{type:"string", enum:["low","medium","high"]},
     notes:{type:"string"}}};
 
@@ -1249,12 +1359,13 @@ async function readLabel(file){
       "This photo shows a packaged food product: its Nutrition Facts panel, the front of the pack, or its barcode. " +
       "Identify the product and give calories, protein, carbohydrate and fat for ONE serving as printed on the label, plus the serving size text and its weight in grams (0 if not printed). " +
       "If no nutrition panel is readable but you recognise the product, give typical values and set source to \"estimate\". " +
+      "Also give micronutrients for the same amount: fibre, sugars, saturated fat and omega-3 in grams; sodium, potassium, calcium, iron, magnesium, zinc and vitamin C in milligrams; vitamin D, B12, A (RAE) and folate (DFE) in micrograms. Use the label's values where printed and estimate the rest from typical values for this kind of product. " +
       "If you cannot identify the food at all, set found to false, source to \"none\", and use empty strings and zeros for the rest.",
       LABEL_SCHEMA);
     const w = $("lblWork"); if (w) w.remove();
     if (!r.found || !(r.kcal >= 0)) { box.insertAdjacentHTML("beforeend", `<p class="msg err">Couldn't read that package. Try a closer photo of the Nutrition Facts panel, or type the values below.</p>`); return; }
     const name = (String(r.name || "Packaged food").slice(0,80) + (r.serving ? ` (${String(r.serving).slice(0,30)})` : "")).trim();
-    fillForm({name, kcal:Math.round(r.kcal), p:r1(r.protein_g), c:r1(r.carbs_g), f:r1(r.fat_g), unit:"serving", source: r.source === "estimate" ? "AI estimate" : "Read from label"});
+    fillForm({name, kcal:Math.round(r.kcal), p:r1(r.protein_g), c:r1(r.carbs_g), f:r1(r.fat_g), unit:"serving", source: r.source === "estimate" ? "AI estimate" : "Read from label", m:fromAIMicros(r), mEst:true});
     box.insertAdjacentHTML("beforeend", `<p class="msg ok">${r.source === "estimate" ? "Estimated" : "Read from the label"}: ${esc(name)}. Check the numbers below, then add it. The barcode will be remembered.</p>`);
     focusAmount();
   } catch (err) {
@@ -1287,11 +1398,12 @@ $("mealGo").addEventListener("click", async () => {
     const r = await aiJSON(mealFile,
       "You are a careful nutrition estimator. The photo shows a meal or snack. Identify each distinct food or drink, estimate its portion (grams or common units), " +
       "and estimate calories plus protein, carbohydrate and fat in grams for that portion. Account for likely cooking oil, butter, sauces and dressings. " +
+      "Also give micronutrients for the same amount: fibre, sugars, saturated fat and omega-3 in grams; sodium, potassium, calcium, iron, magnesium, zinc and vitamin C in milligrams; vitamin D, B12, A (RAE) and folate (DFE) in micrograms. " +
       (note ? `The person eating it adds: "${note}". ` : "") +
       "Set confidence to low, medium or high, and use notes for one short sentence on the biggest uncertainty. If there is no food in the photo, return an empty items list and say why in notes.",
       MEAL_SCHEMA, mealCtl.signal);
     mealItems = (r.items || []).slice(0, 15).map(it => ({on:true, name:String(it.name || "Food").slice(0,80), portion:String(it.portion || "").slice(0,40),
-      kcal:Math.max(0, Math.round(+it.kcal || 0)), p:r1(it.protein_g), c:r1(it.carbs_g), f:r1(it.fat_g)}));
+      kcal:Math.max(0, Math.round(+it.kcal || 0)), p:r1(it.protein_g), c:r1(it.carbs_g), f:r1(it.fat_g), m:fromAIMicros(it)}));
     if (!mealItems.length) setMealMsg(`No food found in that photo. ${r.notes || ""}`, "err");
     else renderMealItems(r.confidence, r.notes);
   } catch (err) {
@@ -1339,8 +1451,8 @@ $("mealOut").addEventListener("click", e => {
   const meal = $("fMeal").value, day = state.date;
   const added = mealItems.filter(i => i.on).map(it => {
     const name = it.name.trim() || "Food";
-    return {id:uid(), name, meal, kcal:Math.round(it.kcal), p:r1(it.p), c:r1(it.c), f:r1(it.f),
-      base:{name, kcal:Math.round(it.kcal), p:it.p, c:it.c, f:it.f, unit:"serving", source:"AI estimate"}, t:Date.now(), src:"photo"};
+    return {id:uid(), name, meal, kcal:Math.round(it.kcal), p:r1(it.p), c:r1(it.c), f:r1(it.f), m:it.m, mEst:true,
+      base:{name, kcal:Math.round(it.kcal), p:it.p, c:it.c, f:it.f, unit:"serving", source:"AI estimate", m:it.m, mEst:true}, t:Date.now(), src:"photo"};
   });
   state.days[day] = [...entriesFor(day), ...added];
   persist(); render(); show("today");
@@ -1391,7 +1503,7 @@ function renderReview(){
       ${(r.gaps||[]).length ? `<div class="rv-sec"><h3>What's missing</h3>${r.gaps.map(x => `<div class="gap"><b>${esc(x.name)}</b><p>${esc(x.why)}</p>${(x.foods||[]).length ? `<div class="foods">${x.foods.slice(0,5).map(f => `<span>${esc(f)}</span>`).join("")}</div>` : ""}</div>`).join("")}</div>` : ""}
       ${r.next ? `<div class="next"><b>Eat next</b>${esc(r.next)}</div>` : ""}
       ${(r.wins||[]).length ? `<div class="rv-sec"><h3>Going well</h3><ul class="rv-list">${r.wins.map(w => `<li>${esc(w)}</li>`).join("")}</ul></div>` : ""}
-      <p class="hint">AI feedback based only on what you logged. Vitamins, minerals and fibre are inferred from food names, so treat them as estimates. This is general guidance, not medical advice.</p>
+      <p class="hint">AI feedback based only on what you logged, including the micronutrient totals on the Trends tab, which are approximate. This is general guidance, not medical advice.</p>
     </section>`;
   }
   $("rvOut").innerHTML = html;
@@ -1408,7 +1520,9 @@ function reviewPrompt(k){
     `\n\nDaily targets: ${s.goal} kcal, ${s.p} g protein, ${s.c} g carbohydrate, ${s.f} g fat.` +
     `\nLogged ${isToday ? `so far today (local time now ${new Date().toLocaleTimeString(undefined,{hour:"numeric", minute:"2-digit"})})` : "for this past day"}:\n${lines}` +
     `\nTotals: ${Math.round(t.kcal)} kcal, ${r1(t.p)} g protein, ${r1(t.c)} g carbohydrate, ${r1(t.f)} g fat.` +
-    `\n\nJudge the day against their focus for peak physical and mental performance. Consider calories and macros against the targets, protein spread across meals, fibre, fruit and vegetable variety, likely micronutrient gaps (for example iron, calcium, magnesium, potassium, vitamin D, B12, omega-3), hydration cues, and how processed the foods are. You only know what is logged, so infer sensibly from the food names and say "likely" where you are inferring.` +
+    `\nTracked micronutrient totals (approximate, from food databases and estimates): ${(() => { const mt = microTotals(es); return MICROS.map(m => `${m.label} ${mfmt(mt[m.key], m.unit)}${m.ref ? ` (${Math.round(mt[m.key]/m.ref*100)}% of the ${m.ref} ${m.unit} daily ${m.kind === "max" ? "limit" : "value"})` : ""}`).join("; "); })()}.` +
+    (es.some(e => missingMicros(e).length) ? ` Micronutrient data is incomplete for ${es.filter(e => missingMicros(e).length).length} of ${es.length} entries, so those totals are underestimates; infer the rest from the food names.` : "") +
+    `\n\nJudge the day against their focus for peak physical and mental performance. Consider calories and macros against the targets, protein spread across meals, fibre, fruit and vegetable variety, the tracked micronutrient totals above (name the specific shortfalls and excesses with their numbers), hydration cues, and how processed the foods are. The micronutrient figures are estimates, so treat small differences as noise.` +
     `\n\nReturn: score (0-100 for how well the day supports their focus${isToday ? ", judged for this point in the day" : ""}); headline (one plain sentence, under 14 words); wins (2-3 short specific things that went well; fewer if the day is thin); gaps (the 2-4 most important things missing or overdone, most important first, each with a short name, a one-or-two-sentence why tied to performance, and 2-4 specific foods that would fix it); next (one or two sentences: ${isToday ? "the best thing to eat for the rest of today, with rough amounts" : "what to change tomorrow"}). Be direct and specific to the foods they logged. Do not give medical advice or mention supplements unless food alone clearly cannot cover it.`;
 }
 $("rvGo").addEventListener("click", async () => {
@@ -1416,6 +1530,7 @@ $("rvGo").addEventListener("click", async () => {
   if (!entriesFor(k).length || !hasAI() || rvCtl) return;
   rvCtl = new AbortController(); rvError = ""; renderReview();
   try {
+    enrichErr = ""; clearTimeout(enrichTimer); await enrichDay(k); // fill in missing micronutrients first so the review can use them
     const stamp = dayStamp(k), focus = state.coach.focus;
     const result = await aiJSON(null, reviewPrompt(k), REVIEW_SCHEMA, rvCtl.signal);
     state.reviews[k] = {at: Date.now(), stamp, focus, result};
