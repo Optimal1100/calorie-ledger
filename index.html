@@ -189,7 +189,8 @@ button.day{border:0;background:none}
 .entry .del:hover{background:var(--warn-soft);color:var(--warn)}
 
 /* Add view */
-.tools{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:520px){.tool-btn{padding:14px 12px}.tool-btn small{display:none}.tool-btn b{font-size:15px}}
 .tool-btn{display:grid;gap:10px;border:0;background:var(--card);border-radius:var(--r);padding:16px;text-align:left;min-width:0;box-shadow:var(--shadow)}
 .tool-btn:active{transform:scale(.98)}
 .tool-btn[aria-expanded="true"]{background:var(--accent);color:var(--accent-ink)}
@@ -434,7 +435,11 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
       </button>
       <button type="button" class="tool-btn" id="openPhoto" aria-expanded="false" aria-controls="panelPhoto">
         <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
-        <span><b>Snap a meal</b><small>AI estimates calories and macros</small></span>
+        <span><b>Snap a meal</b><small>AI estimates from a photo</small></span>
+      </button>
+      <button type="button" class="tool-btn" id="openText" aria-expanded="false" aria-controls="panelText">
+        <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5"/></svg></span>
+        <span><b>Describe it</b><small>AI estimates from your words</small></span>
       </button>
     </div>
 
@@ -464,6 +469,14 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
       <div class="field"><label for="mealNote">Anything the photo can't show (optional)</label><textarea id="mealNote" class="note" rows="1" placeholder="e.g. cooked in butter, large bowl, dressing on the side"></textarea></div>
       <div class="inline"><button type="button" class="primary" id="mealGo" disabled>Estimate calories</button><button type="button" class="ghost" id="mealStop" hidden>Stop</button></div>
       <div id="mealOut"></div>
+    </section>
+
+    <section class="card panel" id="panelText" hidden>
+      <h3>Describe what you ate</h3>
+      <div id="textNoKey" hidden><p class="msg">This needs a free Google Gemini key. <button type="button" class="ghost" id="textGotoKey" style="margin-left:6px">Add your key</button></p></div>
+      <div class="field"><label for="descText">In English or Swedish. Amounts help, but aren't required.</label><textarea id="descText" class="note" rows="3" placeholder="e.g. två stekta ägg, en skiva rågbröd med smör och ost, ett glas mjölk"></textarea></div>
+      <div class="inline"><button type="button" class="primary" id="descGo" disabled>Estimate calories</button><button type="button" class="ghost" id="descStop" hidden>Stop</button></div>
+      <div id="descOut"></div>
     </section>
 
     <section class="card">
@@ -1630,7 +1643,7 @@ document.addEventListener("visibilitychange", () => {
 
 // ---------- tools ----------
 function togglePanel(which){
-  [["openBarcode","panelBarcode"],["openPhoto","panelPhoto"]].forEach(([b,p]) => {
+  [["openBarcode","panelBarcode"],["openPhoto","panelPhoto"],["openText","panelText"]].forEach(([b,p]) => {
     const open = p === which && $(p).hidden;
     $(p).hidden = !open; $(b).setAttribute("aria-expanded", open);
   });
@@ -1638,6 +1651,7 @@ function togglePanel(which){
 }
 $("openBarcode").addEventListener("click", () => togglePanel("panelBarcode"));
 $("openPhoto").addEventListener("click", () => togglePanel("panelPhoto"));
+$("openText").addEventListener("click", () => { togglePanel("panelText"); if (!$("panelText").hidden) $("descText").focus(); });
 function wireFile(labelId, inputId, onFile){
   const lab = $(labelId);
   ["dragenter","dragover"].forEach(t => lab.addEventListener(t, e => { e.preventDefault(); lab.classList.add("over"); }));
@@ -1973,11 +1987,45 @@ async function readLabel(file){
 
 // --- meal photo ---
 let mealFile = null, mealCtl = null, mealItems = [];
-function setMealMsg(t, cls){ $("mealOut").innerHTML = `<p class="msg ${cls||""}">${esc(t)}</p>`; }
+let mealTarget = "mealOut";   // where AI results show: "mealOut" for a photo, "descOut" for a description
+function setMealMsg(t, cls){ $(mealTarget).innerHTML = `<p class="msg ${cls||""}">${esc(t)}</p>`; }
 function refreshPhotoUI(){
-  $("photoNoKey").hidden = hasAI();
+  $("photoNoKey").hidden = hasAI(); $("textNoKey").hidden = hasAI();
   $("mealGo").disabled = !mealFile || !hasAI() || !!mealCtl;
+  $("descGo").disabled = !$("descText").value.trim() || !hasAI() || !!mealCtl;
 }
+const MICRO_ASK = "Also give micronutrients for the same amount: fibre, sugars, saturated fat and omega-3 in grams; sodium, potassium, calcium, iron, magnesium, zinc and vitamin C in milligrams; vitamin D, B12, A (RAE) and folate (DFE) in micrograms. ";
+const toMealItems = r => (r.items || []).slice(0, 20).map(it => ({on:true, name:String(it.name || "Food").slice(0,80), portion:String(it.portion || "").slice(0,40),
+  kcal:Math.max(0, Math.round(+it.kcal || 0)), p:r1(it.protein_g), c:r1(it.carbs_g), f:r1(it.fat_g), m:fromAIMicros(it)}));
+// --- describe a meal in words ---
+$("descText").addEventListener("input", refreshPhotoUI);
+$("textGotoKey").addEventListener("click", () => $("gotoKey").click());
+$("descStop").addEventListener("click", () => mealCtl && mealCtl.abort());
+$("descGo").addEventListener("click", async () => {
+  const text = $("descText").value.trim().slice(0, 1500);
+  if (!text || !hasAI() || mealCtl) return;
+  mealTarget = "descOut"; $("mealOut").innerHTML = "";
+  mealCtl = new AbortController(); refreshPhotoUI(); $("descStop").hidden = false;
+  $("descOut").innerHTML = working("Working out what's in your meal…");
+  try {
+    const r = await aiJSON(null,
+      "You are a careful nutrition estimator. A person describes what they ate, in English or Swedish. Split it into each distinct food or drink. " +
+      "Use the amounts they give; where they give none, assume a typical single portion as served in Sweden and say the amount you assumed in the portion field (grams or common units). " +
+      "For each item estimate calories plus protein, carbohydrate and fat in grams for that portion, including cooking fat, spreads, sauces and dressings they mention or that the dish normally contains. " +
+      MICRO_ASK +
+      "Write each item's name in the same language the person used. Set confidence to low, medium or high, and use notes (in English) for one short sentence on the biggest assumption you made. " +
+      "If the text doesn't describe any food or drink, return an empty items list and say so in notes.\n\nWhat they ate: \"" + text.replace(/"/g, "'") + "\"",
+      MEAL_SCHEMA, mealCtl.signal);
+    mealItems = toMealItems(r);
+    if (!mealItems.length) setMealMsg(`Couldn't find any food in that description. ${r.notes || ""}`, "err");
+    else renderMealItems(r.confidence, r.notes);
+  } catch (err) {
+    if (err && err.kind === "cancelled") $("descOut").innerHTML = "";
+    else setMealMsg(aiErrorCopy(err), "err");
+  } finally {
+    mealCtl = null; $("descStop").hidden = true; refreshPhotoUI();
+  }
+});
 wireFile("mealDrop", "mealFile", file => {
   mealFile = file;
   $("mealThumb").outerHTML = `<img id="mealThumb" alt="Your meal photo" src="${URL.createObjectURL(file)}">`;
@@ -1987,7 +2035,8 @@ wireFile("mealDrop", "mealFile", file => {
 $("gotoKey").addEventListener("click", () => { show("settings", true); $("keysCard").scrollIntoView({behavior:"smooth", block:"center"}); $("kGemini").focus({preventScroll:true}); });
 $("mealStop").addEventListener("click", () => mealCtl && mealCtl.abort());
 $("mealGo").addEventListener("click", async () => {
-  if (!mealFile || !hasAI()) return;
+  if (!mealFile || !hasAI() || mealCtl) return;
+  mealTarget = "mealOut"; $("descOut").innerHTML = "";
   mealCtl = new AbortController(); refreshPhotoUI(); $("mealStop").hidden = false;
   $("mealOut").innerHTML = working("Looking at your meal… this can take up to a minute.");
   const note = $("mealNote").value.trim().slice(0, 500);
@@ -1999,8 +2048,7 @@ $("mealGo").addEventListener("click", async () => {
       (note ? `The person eating it adds: "${note}". ` : "") +
       "Set confidence to low, medium or high, and use notes for one short sentence on the biggest uncertainty. If there is no food in the photo, return an empty items list and say why in notes.",
       MEAL_SCHEMA, mealCtl.signal);
-    mealItems = (r.items || []).slice(0, 15).map(it => ({on:true, name:String(it.name || "Food").slice(0,80), portion:String(it.portion || "").slice(0,40),
-      kcal:Math.max(0, Math.round(+it.kcal || 0)), p:r1(it.protein_g), c:r1(it.carbs_g), f:r1(it.fat_g), m:fromAIMicros(it)}));
+    mealItems = toMealItems(r);
     if (!mealItems.length) setMealMsg(`No food found in that photo. ${r.notes || ""}`, "err");
     else renderMealItems(r.confidence, r.notes);
   } catch (err) {
@@ -2012,7 +2060,7 @@ $("mealGo").addEventListener("click", async () => {
 });
 function renderMealItems(conf, notes){
   const c = ["low","medium","high"].includes(conf) ? conf : "medium";
-  $("mealOut").innerHTML = `<div class="items">${mealItems.map((it,i) => `
+  $(mealTarget).innerHTML = `<div class="items">${mealItems.map((it,i) => `
     <div class="item" data-i="${i}">
       <input type="checkbox" data-k="on" checked aria-label="Include ${esc(it.name)}">
       <div>
@@ -2025,7 +2073,7 @@ function renderMealItems(conf, notes){
         </div>
       </div>
     </div>`).join("")}</div>
-    <p class="msg" style="margin-top:10px"><span class="conf ${c}">${c} confidence</span> ${esc(notes || "")} Photo estimates can be off by 20% or more, so adjust anything that looks wrong.</p>
+    <p class="msg" style="margin-top:10px"><span class="conf ${c}">${c} confidence</span> ${esc(notes || "")} ${mealTarget === "descOut" ? "Estimates from a description depend on the portions assumed" : "Photo estimates can be off by 20% or more"}, so adjust anything that looks wrong.</p>
     <div class="res-foot"><span class="tot num" id="mealTot"></span><button type="button" class="primary" id="mealAdd"></button></div>`;
   updateMealFoot();
 }
@@ -2035,21 +2083,21 @@ function updateMealFoot(){
   $("mealAdd").textContent = `Add ${on.length} ${on.length===1?"item":"items"} to ${mealName()}`;
   $("mealAdd").disabled = !on.length;
 }
-$("mealOut").addEventListener("input", e => {
+const onMealInput = e => {
   const row = e.target.closest("[data-i]"), k = e.target.dataset.k; if (!row || !k) return;
   const it = mealItems[+row.dataset.i];
   if (k === "on") { it.on = e.target.checked; row.classList.toggle("off", !it.on); }
   else if (k === "name") it.name = e.target.value;
   else it[k] = num(e.target.value);
   updateMealFoot();
-});
-$("mealOut").addEventListener("click", e => {
+};
+const onMealClick = e => {
   if (e.target.id !== "mealAdd") return;
   const meal = $("fMeal").value, day = state.date;
   const added = mealItems.filter(i => i.on).map(it => {
     const name = it.name.trim() || "Food";
     return {id:uid(), name, meal, kcal:Math.round(it.kcal), p:r1(it.p), c:r1(it.c), f:r1(it.f), m:it.m, mEst:true,
-      base:{name, kcal:Math.round(it.kcal), p:it.p, c:it.c, f:it.f, unit:"serving", source:"AI estimate", m:it.m, mEst:true}, t:Date.now(), src:"photo"};
+      base:{name, kcal:Math.round(it.kcal), p:it.p, c:it.c, f:it.f, unit:"serving", source:"AI estimate", m:it.m, mEst:true}, t:Date.now(), src: mealTarget === "descOut" ? "text" : "photo"};
   });
   state.days[day] = [...entriesFor(day), ...added];
   persist(); render(); show("today");
@@ -2057,11 +2105,17 @@ $("mealOut").addEventListener("click", e => {
     const ids = new Set(added.map(x => x.id));
     state.days[day] = entriesFor(day).filter(x => !ids.has(x.id)); persist(); render();
   });
-  mealItems = []; mealFile = null;
-  $("mealThumb").outerHTML = `<span class="ph" id="mealThumb"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>`;
-  $("mealDropTitle").textContent = "Take or choose a photo of your meal";
-  $("mealNote").value = ""; setMealMsg("Logged. Snap another meal any time.", "ok"); refreshPhotoUI();
-});
+  mealItems = [];
+  if (mealTarget === "descOut") { $("descText").value = ""; setMealMsg("Logged. Describe another meal any time.", "ok"); }
+  else {
+    mealFile = null;
+    $("mealThumb").outerHTML = `<span class="ph" id="mealThumb"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>`;
+    $("mealDropTitle").textContent = "Take or choose a photo of your meal";
+    $("mealNote").value = ""; setMealMsg("Logged. Snap another meal any time.", "ok");
+  }
+  refreshPhotoUI();
+};
+["mealOut","descOut"].forEach(id => { $(id).addEventListener("input", onMealInput); $(id).addEventListener("click", onMealClick); });
 
 // ---------- AI self-test: ask each model a tiny question and show what comes back ----------
 $("aiTest").addEventListener("click", async () => {
