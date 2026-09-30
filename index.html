@@ -281,6 +281,11 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
 .stale{background:var(--warn-soft);color:var(--warn);border-radius:12px;padding:10px 12px;font-size:13px;font-weight:600}
 
 /* Settings */
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.sugg{background:var(--accent-soft);border-radius:14px;padding:14px;display:grid;gap:10px}
+.sugg b.t{font:700 11px/1 var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.sugg .nums{font:800 18px/1.3 var(--display)}
+.sugg p{margin:0;font-size:13px;line-height:1.45}
 .stack{display:grid;gap:14px}
 .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .row-btns{display:flex;gap:8px;flex-wrap:wrap}
@@ -450,7 +455,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
           <option value="mental focus and steady energy">Mental focus</option>
         </select>
       </div>
-      <div class="field"><label for="rvAbout">About you (optional)</label><textarea id="rvAbout" class="note" rows="2" placeholder="e.g. 82 kg, lift 4 times a week, vegetarian, trained legs today"></textarea></div>
+      <div class="field"><label for="rvAbout">Anything about this day? (optional)</label><textarea id="rvAbout" class="note" rows="2" placeholder="e.g. trained legs this morning, slept badly, long run tomorrow"></textarea></div>
       <button type="button" class="primary wide" id="rvGo">Review my day</button>
       <div id="rvNoKey" hidden><p class="msg">Reviews need a free Google Gemini key. <button type="button" class="ghost" id="rvGotoKey" style="margin-left:6px">Add your key</button></p></div>
     </section>
@@ -459,6 +464,44 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
 
   <!-- SETTINGS -->
   <main class="view" id="view-settings" hidden>
+    <section class="card">
+      <p class="eyebrow">About you</p>
+      <form class="stack" id="profileForm">
+        <div class="two">
+          <div class="field"><label for="pfSex">Sex</label>
+            <select id="pfSex"><option value="">Prefer not to say</option><option value="male">Male</option><option value="female">Female</option></select></div>
+          <div class="field"><label for="pfAge">Age</label><input id="pfAge" type="number" min="10" max="110" step="1" inputmode="numeric" placeholder="years"></div>
+        </div>
+        <div class="two">
+          <div class="field"><label for="pfUnits">Units</label>
+            <select id="pfUnits"><option value="metric">Metric (kg, cm)</option><option value="imperial">Imperial (lb, ft)</option></select></div>
+          <div class="field"><label for="pfWeight" id="pfWeightLabel">Weight (kg)</label><input id="pfWeight" type="number" min="0" step="any" inputmode="decimal"></div>
+        </div>
+        <div class="two" id="pfMetricH">
+          <div class="field"><label for="pfHeight">Height (cm)</label><input id="pfHeight" type="number" min="0" step="any" inputmode="decimal"></div>
+        </div>
+        <div class="two" id="pfImperialH" hidden>
+          <div class="field"><label for="pfFt">Height (ft)</label><input id="pfFt" type="number" min="0" step="1" inputmode="numeric"></div>
+          <div class="field"><label for="pfIn">and inches</label><input id="pfIn" type="number" min="0" max="11.9" step="any" inputmode="decimal"></div>
+        </div>
+        <div class="field"><label for="pfActivity">Activity level</label>
+          <select id="pfActivity">
+            <option value="sedentary">Mostly sitting, little exercise</option>
+            <option value="light">Light: exercise 1–2 days a week</option>
+            <option value="moderate">Moderate: exercise 3–5 days a week</option>
+            <option value="very">Very active: hard exercise 6–7 days a week</option>
+            <option value="athlete">Athlete: training twice a day or physical job</option>
+          </select></div>
+        <div class="field"><label for="pfNotes">Diet, allergies or anything else the AI should know (optional)</label><textarea id="pfNotes" class="note" rows="2" placeholder="e.g. vegetarian, lactose intolerant, training for a half marathon"></textarea></div>
+        <div class="row-btns">
+          <button class="primary" type="submit">Save</button>
+          <button class="ghost" type="button" id="pfCalc">Calculate my targets</button>
+        </div>
+        <div id="pfOut"></div>
+        <span class="hint">Used to set your vitamin and mineral targets and to personalise the AI review. Stored on this device; sent to the AI only when you run a review or calculate targets with a key saved.</span>
+      </form>
+    </section>
+
     <section class="card">
       <p class="eyebrow">Daily targets</p>
       <form class="stack" id="targetForm">
@@ -590,16 +633,18 @@ const working = t => `<div class="working"><span class="spin"></span>${esc(t)}</
 const titleCase = s => s.toLowerCase().replace(/(^|[\s,(\/-])([a-z])/g, (m,a,b) => a + b.toUpperCase());
 
 // ---------- storage (this device) ----------
-const state = { settings:{...DEFAULTS}, days:{}, barcodes:{}, coach:{focus:"overall energy and health", about:""}, reviews:{}, date:keyOf(new Date()) };
+const state = { settings:{...DEFAULTS}, days:{}, barcodes:{}, coach:{focus:"overall energy and health", about:""}, reviews:{},
+  profile:{units:"metric", sex:"", age:"", weightKg:"", heightCm:"", activity:"moderate", notes:""}, microRefs:null, plan:null, date:keyOf(new Date()) };
 let keys = {gemini:"", anthropic:"", usda:""};
 const hasAI = () => !!(keys.gemini || keys.anthropic);
 try {
   const raw = localStorage.getItem(LS_KEY);
-  if (raw) { const o = JSON.parse(raw); state.settings = {...DEFAULTS, ...(o.settings||{})}; state.days = o.days || {}; state.barcodes = o.barcodes || {}; state.coach = {...state.coach, ...(o.coach||{})}; state.reviews = o.reviews || {}; }
+  if (raw) { const o = JSON.parse(raw); state.settings = {...DEFAULTS, ...(o.settings||{})}; state.days = o.days || {}; state.barcodes = o.barcodes || {}; state.coach = {...state.coach, ...(o.coach||{})}; state.reviews = o.reviews || {};
+    state.profile = {...state.profile, ...(o.profile||{})}; state.microRefs = o.microRefs || null; state.plan = o.plan || null; }
   const k = localStorage.getItem(KEYS_KEY); if (k) keys = {...keys, ...JSON.parse(k)};
 } catch {}
 function persist(){
-  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews})); }
+  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews, profile:state.profile, microRefs:state.microRefs, plan:state.plan})); }
   catch { toast("Couldn't save. Your device storage may be full."); }
 }
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
@@ -624,6 +669,48 @@ function defaultMeal(){
 }
 const mealName = () => MEALS.find(m => m[0] === $("fMeal").value)[1];
 
+// ---------- personal targets ----------
+// Daily reference intakes by sex and age (US/Canada DRIs). Without a sex set, the generic label Daily Values apply.
+function driRefs(){
+  const base = Object.fromEntries(MICROS.map(m => [m.key, m.ref]));
+  const p = state.profile, goal = state.settings.goal;
+  base.satfat = Math.round(goal * 0.10 / 9);            // under 10% of calories
+  if (!p.sex) return base;
+  const f = p.sex === "female", age = +p.age || 30;
+  return {...base,
+    fiber: Math.round(goal / 1000 * 14),
+    potassium: f ? 2600 : 3400,
+    calcium: age < 19 ? 1300 : (f && age > 50) || age > 70 ? 1200 : 1000,
+    iron: age < 19 ? (f ? 15 : 11) : f && age <= 50 ? 18 : 8,
+    magnesium: f ? (age <= 30 ? 310 : 320) : (age <= 30 ? 400 : 420),
+    zinc: f ? 8 : 11, vitc: f ? 75 : 90, vitd: age > 70 ? 20 : 15, b12: 2.4, vita: f ? 700 : 900, folate: 400, omega3: f ? 1.1 : 1.6, sodium: 2300};
+}
+const microRefs = () => ({...driRefs(), ...(state.microRefs || {})});
+const ACTIVITY = {sedentary:[1.2,"mostly sitting, little exercise"], light:[1.375,"lightly active, exercise 1-2 days a week"], moderate:[1.55,"moderately active, exercise 3-5 days a week"],
+  very:[1.725,"very active, hard exercise 6-7 days a week"], athlete:[1.9,"athlete, training twice a day or a physical job"]};
+function profileText(){
+  const p = state.profile, bits = [];
+  if (p.sex) bits.push(`sex ${p.sex}`);
+  if (+p.age) bits.push(`age ${+p.age}`);
+  if (+p.heightCm) bits.push(`height ${Math.round(+p.heightCm)} cm`);
+  if (+p.weightKg) bits.push(`weight ${r1(+p.weightKg)} kg`);
+  bits.push(`activity: ${(ACTIVITY[p.activity] || ACTIVITY.moderate)[1]}`);
+  if (p.notes.trim()) bits.push(`notes: "${p.notes.trim().slice(0,300)}"`);
+  return bits.join("; ");
+}
+// Standard estimate: Mifflin-St Jeor resting energy x activity, adjusted for the chosen focus.
+function formulaPlan(){
+  const p = state.profile, w = +p.weightKg, h = +p.heightCm, age = +p.age;
+  if (!w || !h || !age || !p.sex) return null;
+  const bmr = 10*w + 6.25*h - 5*age + (p.sex === "female" ? -161 : 5);
+  const focus = state.coach.focus;
+  const adj = /building muscle/.test(focus) ? 1.10 : /losing fat/.test(focus) ? 0.80 : 1;
+  const kcal = Math.round(bmr * (ACTIVITY[p.activity] || ACTIVITY.moderate)[0] * adj / 10) * 10;
+  const perKg = /losing fat/.test(focus) ? 2.2 : /building muscle/.test(focus) ? 2.0 : /strength/.test(focus) ? 1.8 : /endurance/.test(focus) ? 1.6 : 1.4;
+  const prot = Math.round(w * perKg), fat = Math.round(kcal * 0.27 / 9), carbs = Math.max(0, Math.round((kcal - prot*4 - fat*9) / 4));
+  return {kcal, p:prot, c:carbs, f:fat};
+}
+
 // ---------- micronutrients ----------
 const mnum = v => Math.round((+v || 0) * 100) / 100;
 const scaleMicros = (m, k) => m ? Object.fromEntries(Object.entries(m).filter(([,v]) => v != null).map(([key,v]) => [key, mnum(v * k)])) : undefined;
@@ -632,14 +719,14 @@ const microTotals = es => Object.fromEntries(MICROS.map(m => [m.key, es.reduce((
 const fromAIMicros = o => Object.fromEntries(MICROS.map(m => [m.key, Math.max(0, mnum(o && o[m.ai]))]));
 const mfmt = (v, unit) => (v >= 100 ? Math.round(v) : v >= 10 ? Math.round(v*10)/10 : Math.round(v*100)/100).toLocaleString() + " " + unit;
 function renderMicros(){
-  const es = entriesFor(state.date), t = microTotals(es);
+  const es = entriesFor(state.date), t = microTotals(es), R = microRefs();
   const need = es.filter(e => missingMicros(e).length).length, est = es.filter(e => e.mEst).length;
   $("microDay").textContent = dayName(state.date);
   if (!es.length) { $("micros2").innerHTML = `<p class="msg">Log food to see fibre, vitamins and minerals for the day.</p>`; return; }
   const row = m => {
-    const v = t[m.key], pc = m.ref ? Math.round(v / m.ref * 100) : null;
+    const v = t[m.key], ref = R[m.key], pc = ref ? Math.round(v / ref * 100) : null;
     const cls = m.kind === "max" ? (pc > 100 ? "over" : "") : m.kind === "min" ? (pc < 50 ? "lowish" : "") : "";
-    return `<div class="mrow ${cls}"><div class="mtop"><b>${m.label}</b><span class="num">${mfmt(v, m.unit)}${m.ref ? ` / ${m.ref.toLocaleString()} ${m.unit}<span class="pc">${pc}%</span>` : ""}</span></div>${m.ref ? `<div class="mbar"><i style="width:${Math.min(pc,100)}%"></i></div>` : ""}</div>`;
+    return `<div class="mrow ${cls}"><div class="mtop"><b>${m.label}</b><span class="num">${mfmt(v, m.unit)}${ref ? ` / ${ref.toLocaleString()} ${m.unit}<span class="pc">${pc}%</span>` : ""}</span></div>${ref ? `<div class="mbar"><i style="width:${Math.min(pc,100)}%"></i></div>` : ""}</div>`;
   };
   let status = "";
   if (enrichBusy) status = working("Estimating micronutrients for your foods…");
@@ -649,7 +736,7 @@ function renderMicros(){
   $("micros2").innerHTML = `<div class="micro-grid">${status}
     <p class="msub" style="margin-top:0">Aim to reach</p>${MICROS.filter(m => m.kind === "min").map(row).join("")}
     <p class="msub">Aim to stay under</p>${MICROS.filter(m => m.kind !== "min").map(row).join("")}
-    <p class="hint">Targets are standard adult daily values. ${est ? `Values for ${est} of ${es.length} ${es.length===1?"food":"foods"} include AI estimates; the rest come from food databases or labels.` : "Values come from food databases and labels."} Treat them as approximate.</p></div>`;
+    <p class="hint">${state.microRefs ? "Targets were tailored to you by AI." : state.profile.sex ? "Targets are the recommended intakes for your sex and age." : "Targets are standard adult daily values. Add your details in Settings to personalise them."} ${est ? `Values for ${est} of ${es.length} ${es.length===1?"food":"foods"} include AI estimates; the rest come from food databases or labels.` : "Values come from food databases and labels."} Treat them as approximate.</p></div>`;
 }
 const MICRO_FILL_SCHEMA = {type:"object", additionalProperties:false, required:["items"], properties:{items:{type:"array",
   items:{type:"object", additionalProperties:false, required:["n", ...MICRO_REQ], properties:{n:{type:"integer"}, ...MICRO_PROPS}}}}};
@@ -1475,7 +1562,7 @@ const REVIEW_SCHEMA = {type:"object", additionalProperties:false, required:["sco
       properties:{name:{type:"string"}, why:{type:"string"}, foods:{type:"array", items:{type:"string"}}}}},
     next:{type:"string"}}};
 let rvCtl = null, rvError = "";
-const dayStamp = k => entriesFor(k).map(e => `${e.id}:${e.kcal}`).join("|") + "#" + JSON.stringify(state.settings) + state.coach.focus + state.coach.about;
+const dayStamp = k => entriesFor(k).map(e => `${e.id}:${e.kcal}`).join("|") + "#" + JSON.stringify(state.settings) + state.coach.focus + state.coach.about + JSON.stringify(state.profile) + JSON.stringify(state.microRefs);
 function dayName(k){
   const diff = Math.round((parseKey(keyOf(new Date())) - parseKey(k)) / 864e5);
   return diff === 0 ? "today" : diff === 1 ? "yesterday" : parseKey(k).toLocaleDateString(undefined,{weekday:"long", month:"short", day:"numeric"});
@@ -1516,13 +1603,14 @@ function reviewPrompt(k){
   }).join("\n");
   const isToday = k === keyOf(new Date());
   return `You are a sports nutrition coach reviewing one day of a person's food log. Their focus is: ${state.coach.focus}.` +
-    (state.coach.about.trim() ? ` About them: "${state.coach.about.trim().slice(0,400)}".` : "") +
+    ` About them: ${profileText()}.` +
+    (state.coach.about.trim() ? ` About this day, in their words: "${state.coach.about.trim().slice(0,400)}".` : "") +
     `\n\nDaily targets: ${s.goal} kcal, ${s.p} g protein, ${s.c} g carbohydrate, ${s.f} g fat.` +
     `\nLogged ${isToday ? `so far today (local time now ${new Date().toLocaleTimeString(undefined,{hour:"numeric", minute:"2-digit"})})` : "for this past day"}:\n${lines}` +
     `\nTotals: ${Math.round(t.kcal)} kcal, ${r1(t.p)} g protein, ${r1(t.c)} g carbohydrate, ${r1(t.f)} g fat.` +
-    `\nTracked micronutrient totals (approximate, from food databases and estimates): ${(() => { const mt = microTotals(es); return MICROS.map(m => `${m.label} ${mfmt(mt[m.key], m.unit)}${m.ref ? ` (${Math.round(mt[m.key]/m.ref*100)}% of the ${m.ref} ${m.unit} daily ${m.kind === "max" ? "limit" : "value"})` : ""}`).join("; "); })()}.` +
+    `\nTracked micronutrient totals against this person's daily targets (approximate, from food databases and estimates): ${(() => { const mt = microTotals(es), R = microRefs(); return MICROS.map(m => `${m.label} ${mfmt(mt[m.key], m.unit)}${R[m.key] ? ` (${Math.round(mt[m.key]/R[m.key]*100)}% of their ${R[m.key]} ${m.unit} daily ${m.kind === "max" ? "limit" : "target"})` : ""}`).join("; "); })()}.` +
     (es.some(e => missingMicros(e).length) ? ` Micronutrient data is incomplete for ${es.filter(e => missingMicros(e).length).length} of ${es.length} entries, so those totals are underestimates; infer the rest from the food names.` : "") +
-    `\n\nJudge the day against their focus for peak physical and mental performance. Consider calories and macros against the targets, protein spread across meals, fibre, fruit and vegetable variety, the tracked micronutrient totals above (name the specific shortfalls and excesses with their numbers), hydration cues, and how processed the foods are. The micronutrient figures are estimates, so treat small differences as noise.` +
+    `\n\nJudge the day against their focus for peak physical and mental performance, scaled to their body size, age, sex and activity where known (for example protein per kg of body weight). Consider calories and macros against the targets, protein spread across meals, fibre, fruit and vegetable variety, the tracked micronutrient totals above (name the specific shortfalls and excesses with their numbers), hydration cues, and how processed the foods are. The micronutrient figures are estimates, so treat small differences as noise.` +
     `\n\nReturn: score (0-100 for how well the day supports their focus${isToday ? ", judged for this point in the day" : ""}); headline (one plain sentence, under 14 words); wins (2-3 short specific things that went well; fewer if the day is thin); gaps (the 2-4 most important things missing or overdone, most important first, each with a short name, a one-or-two-sentence why tied to performance, and 2-4 specific foods that would fix it); next (one or two sentences: ${isToday ? "the best thing to eat for the rest of today, with rough amounts" : "what to change tomorrow"}). Be direct and specific to the foods they logged. Do not give medical advice or mention supplements unless food alone clearly cannot cover it.`;
 }
 $("rvGo").addEventListener("click", async () => {
@@ -1545,11 +1633,94 @@ $("rvFocus").addEventListener("change", () => { state.coach.focus = $("rvFocus")
 $("rvAbout").addEventListener("change", () => { state.coach.about = $("rvAbout").value; persist(); renderReview(); });
 $("rvGotoKey").addEventListener("click", () => { show("settings", true); $("keysCard").scrollIntoView({behavior:"smooth", block:"center"}); $("kGemini").focus({preventScroll:true}); });
 
+// ---------- profile ----------
+function fillProfile(){
+  const p = state.profile, imp = p.units === "imperial";
+  $("pfSex").value = p.sex; $("pfAge").value = p.age; $("pfUnits").value = p.units; $("pfActivity").value = p.activity; $("pfNotes").value = p.notes;
+  $("pfWeightLabel").textContent = imp ? "Weight (lb)" : "Weight (kg)";
+  $("pfWeight").value = +p.weightKg ? r1(imp ? p.weightKg * 2.20462 : +p.weightKg) : "";
+  $("pfMetricH").hidden = imp; $("pfImperialH").hidden = !imp;
+  $("pfHeight").value = +p.heightCm ? r1(+p.heightCm) : "";
+  const inches = (+p.heightCm || 0) / 2.54;
+  $("pfFt").value = inches ? Math.floor(inches / 12) : ""; $("pfIn").value = inches ? Math.round((inches % 12) * 100) / 100 : "";
+}
+function readProfile(){
+  const imp = $("pfUnits").value === "imperial", w = num($("pfWeight").value);
+  const cm = imp ? (num($("pfFt").value) * 12 + num($("pfIn").value)) * 2.54 : num($("pfHeight").value);
+  state.profile = {units:$("pfUnits").value, sex:$("pfSex").value, age:num($("pfAge").value) || "", weightKg: w ? (imp ? w / 2.20462 : w) : "", heightCm: cm || "",
+    activity:$("pfActivity").value, notes:$("pfNotes").value};
+}
+$("pfUnits").addEventListener("change", () => {
+  // Keep what's typed: read it in the old units, then redisplay in the new ones.
+  const next = $("pfUnits").value; $("pfUnits").value = state.profile.units; readProfile(); state.profile.units = next; fillProfile();
+});
+$("profileForm").addEventListener("submit", e => {
+  e.preventDefault(); readProfile(); persist(); document.activeElement.blur(); render(); toast("Saved. Your micronutrient targets now match your details.");
+});
+const PLAN_SCHEMA = {type:"object", additionalProperties:false, required:["kcal","protein_g","carbs_g","fat_g","summary", ...MICRO_REQ],
+  properties:{kcal:{type:"number"}, protein_g:{type:"number"}, carbs_g:{type:"number"}, fat_g:{type:"number"}, summary:{type:"string"}, ...MICRO_PROPS}};
+let planBusy = false, planErr = "";
+function renderPlan(){
+  const pl = state.plan;
+  let html = "";
+  if (planBusy) html = working("Working out your targets…");
+  else if (planErr) html = `<p class="msg err">${esc(planErr)}</p>`;
+  if (pl && !planBusy) {
+    const s = state.settings, applied = s.goal === pl.kcal && s.p === pl.p && s.c === pl.c && s.f === pl.f;
+    html += `<div class="sugg"><b class="t">${pl.ai ? "Suggested by AI for you" : "Standard estimate for you"}</b>
+      <div class="nums num">${fmt(pl.kcal)} kcal · P ${fmt(pl.p)} g · C ${fmt(pl.c)} g · F ${fmt(pl.f)} g</div>
+      <p>${esc(pl.summary || "")}</p>
+      <p>${state.microRefs ? "Your vitamin and mineral targets on the Trends tab were also tailored." : "Your vitamin and mineral targets on the Trends tab use the recommended intakes for your sex and age."}</p>
+      <div class="row-btns">${applied ? `<span class="msg ok">These are your current daily targets.</span>` : `<button type="button" class="primary" id="planApply">Use as my daily targets</button>`}
+      ${state.microRefs ? `<button type="button" class="ghost" id="planReset">Reset vitamin targets to standard</button>` : ""}</div></div>`;
+  }
+  $("pfOut").innerHTML = html;
+}
+$("pfCalc").addEventListener("click", async () => {
+  readProfile(); persist();
+  const base = formulaPlan();
+  if (!base) { planErr = "Enter your sex, age, height and weight first."; renderPlan(); return; }
+  planErr = "";
+  const focus = state.coach.focus;
+  if (!hasAI()) {
+    state.plan = {...base, ai:false, summary:`Based on your size, age and activity, with your focus set to ${focus} (change that on the Review tab). Add a Gemini key to have AI fine-tune this.`};
+    persist(); render(); renderPlan(); return;
+  }
+  planBusy = true; renderPlan();
+  try {
+    const std = driRefs();
+    const r = await aiJSON(null,
+      `You are a sports dietitian setting daily nutrition targets for one person. About them: ${profileText()}. Their focus: ${focus}.` +
+      `\nA standard formula (Mifflin-St Jeor with an activity factor) gives: ${base.kcal} kcal, ${base.p} g protein, ${base.c} g carbohydrate, ${base.f} g fat.` +
+      `\nStandard reference intakes for their sex and age: ${MICROS.filter(m => std[m.key]).map(m => `${m.ai}=${std[m.key]}`).join(", ")}.` +
+      `\nReturn daily targets tailored to this person: calories and macros (macros must add up to the calories), and a target for each micronutrient in the units named by the field (treat sodium and saturated fat as upper limits; set sugars_g to 0). ` +
+      `Stay close to the standard values unless their size, activity, diet or focus gives a clear evidence-based reason to differ (for example more sodium and potassium for heavy sweating, more iron for menstruating endurance athletes, B12 attention for vegans). Never exceed established safe upper limits. ` +
+      `In summary, explain in two or three plain sentences what you changed from the standard values and why.`, PLAN_SCHEMA);
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, +v || lo));
+    const refs = {};
+    MICROS.forEach(m => { if (std[m.key]) { const v = clamp(r[m.ai], std[m.key]*0.6, std[m.key]*2.5); refs[m.key] = v >= 100 ? Math.round(v/10)*10 : v >= 10 ? Math.round(v) : Math.round(v*10)/10; } });
+    state.microRefs = refs;
+    state.plan = {kcal:Math.round(clamp(r.kcal, base.kcal*0.7, base.kcal*1.4)/10)*10, p:Math.round(clamp(r.protein_g, 30, 400)), c:Math.round(clamp(r.carbs_g, 20, 900)), f:Math.round(clamp(r.fat_g, 20, 300)), ai:true, summary:String(r.summary || "").slice(0, 600)};
+    persist();
+  } catch (err) {
+    planErr = aiErrorCopy(err) + " Showing the standard estimate instead.";
+    state.plan = {...base, ai:false, summary:`Based on your size, age and activity, with your focus set to ${focus}.`};
+    persist();
+  } finally { planBusy = false; render(); renderPlan(); }
+});
+$("pfOut").addEventListener("click", e => {
+  if (e.target.id === "planApply" && state.plan) {
+    const pl = state.plan; state.settings = {goal:pl.kcal, p:pl.p, c:pl.c, f:pl.f};
+    persist(); fillTargets(); render(); renderPlan(); toast("Daily targets updated");
+  }
+  if (e.target.id === "planReset") { state.microRefs = null; persist(); render(); renderPlan(); toast("Vitamin and mineral targets reset to standard"); }
+});
+
 // ---------- settings ----------
 $("targetForm").addEventListener("submit", e => {
   e.preventDefault();
   state.settings = {goal: Math.round(num($("tGoal").value, DEFAULTS.goal)) || DEFAULTS.goal, p:Math.round(num($("tP").value)), c:Math.round(num($("tC").value)), f:Math.round(num($("tF").value))};
-  persist(); document.activeElement.blur(); render(); toast("Targets saved");
+  persist(); document.activeElement.blur(); render(); renderPlan(); toast("Targets saved");
 });
 $("suggestMacros").addEventListener("click", () => {
   const goal = num($("tGoal").value, DEFAULTS.goal);
@@ -1570,7 +1741,7 @@ $("keyForm").addEventListener("submit", e => {
 $("clearKeys").addEventListener("click", () => { keys = {gemini:"", anthropic:"", usda:""}; saveKeys(); toast("Keys removed from this device"); });
 
 $("exportBtn").addEventListener("click", async () => {
-  const blob = new Blob([JSON.stringify({app:"calorie-ledger", version:1, exported:new Date().toISOString(), settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews}, null, 1)], {type:"application/json"});
+  const blob = new Blob([JSON.stringify({app:"calorie-ledger", version:1, exported:new Date().toISOString(), settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews, profile:state.profile, microRefs:state.microRefs, plan:state.plan}, null, 1)], {type:"application/json"});
   const name = `calorie-ledger-${keyOf(new Date())}.json`;
   const file = new File([blob], name, {type:"application/json"});
   if (navigator.canShare && navigator.canShare({files:[file]})) {
@@ -1595,6 +1766,8 @@ $("importFile").addEventListener("change", async e => {
     if (o.barcodes) state.barcodes = {...o.barcodes, ...state.barcodes};
     if (o.reviews) state.reviews = {...o.reviews, ...state.reviews};
     if (o.coach) state.coach = {...state.coach, ...o.coach};
+    if (o.profile) { state.profile = {...state.profile, ...o.profile}; fillProfile(); }
+    if (o.microRefs) state.microRefs = o.microRefs;
     persist(); fillTargets(); render();
     $("dataMsg").className = "msg ok"; $("dataMsg").textContent = `Imported ${added} ${added===1?"entry":"entries"}. Entries you already had were kept.`;
   } catch {
@@ -1613,7 +1786,7 @@ $("toastUndo").addEventListener("click", () => { if (undoFn) undoFn(); undoFn = 
 
 // ---------- start ----------
 $("fMeal").value = defaultMeal();
-setUnitUI(null); fillTargets(); renderKeys(); render(); show(location.hash.slice(1) || "today");
+setUnitUI(null); fillTargets(); fillProfile(); renderKeys(); render(); renderPlan(); show(location.hash.slice(1) || "today");
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
