@@ -1,0 +1,39 @@
+# Rebuilds the bundled Swedish food and barcode data once a week and publishes it if anything changed.
+name: Refresh food data
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"   # Mondays 03:17 UTC
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Swedish food database (Livsmedelsverket)
+        run: python3 tools/build_livsmedel.py
+      - name: Swedish barcodes (Open Food Facts)
+        run: python3 tools/build_barcodes_se.py
+      - name: Publish if the data changed
+        run: |
+          if git diff --quiet -- data/; then
+            echo "No changes this week."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git commit -m "Weekly food data refresh"
+          git push
