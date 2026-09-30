@@ -1,5 +1,5 @@
 // Offline support: the app shell is cached; food lookups and AI calls always go to the network.
-const CACHE = "ledger-v15";
+const CACHE = "ledger-v16";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./vendor/zxing-0.21.3.min.js",
   "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./data/livsmedel.json"];
 

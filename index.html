@@ -1869,25 +1869,34 @@ async function geminiJSON(file, prompt, schema, signal){
   const timeout = file ? 75000 : 45000;
   // Start with the model that answered last time; if one is overloaded, slow or out of free quota, move straight to the next.
   const order = [...new Set([geminiPreferred, ...GEMINI_MODELS].filter(Boolean))];
-  let last = {kind:"gemini", status:0}, data = null;
+  let last = {kind:"gemini", status:0};
   for (const model of order) {
     aiNote(`Asking ${model}…`);
     // Low thinking keeps answers fast; a model that doesn't accept the setting gets the request again without it.
     let r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: {...config, thinkingConfig: {thinkingLevel: "low"}}}, signal, timeout);
     if (r.status === 400 && !/API key/i.test(r.detail)) r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: config}, signal, timeout);
-    if (r.ok) { data = r.data; if (geminiPreferred !== model) { geminiPreferred = model; try { localStorage.setItem(MODEL_KEY, model); } catch {} } break; }
+    if (r.ok) {
+      // A model can answer but with something unusable (cut off, blocked, not valid JSON). Treat that like a failure and try the next one.
+      const cand = ((r.data && r.data.candidates) || [])[0];
+      const blocked = !cand || (r.data.promptFeedback && r.data.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCK/.test(cand.finishReason || "");
+      const text = cand ? ((cand.content && cand.content.parts) || []).filter(p => !p.thought).map(p => p.text || "").join("") : "";
+      let parsed;
+      try { parsed = JSON.parse(text); } catch {}
+      if (parsed !== undefined && !blocked) {
+        if (geminiPreferred !== model) { geminiPreferred = model; try { localStorage.setItem(MODEL_KEY, model); } catch {} }
+        aiNote(""); return parsed;
+      }
+      last = blocked ? {kind:"refused", model} : {kind: cand && cand.finishReason === "MAX_TOKENS" ? "truncated" : "badjson", model};
+      aiNote(`${model} gave an unusable answer, trying another…`);
+      continue;
+    }
     last = {kind:"gemini", status: r.status, model, detail: r.detail, badKey: /API key not valid|API_KEY_INVALID/i.test(r.detail)};
     if (last.badKey || r.status === 401) throw last;
     if (r.status === 0 && navigator.onLine === false) throw {kind:"offline"};
     aiNote(`${model} didn't answer, trying another…`);
   }
   aiNote("");
-  if (!data) throw last;
-  const cand = (data.candidates || [])[0];
-  if (!cand || (data.promptFeedback && data.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCK/.test(cand.finishReason || "")) throw {kind:"refused"};
-  if (cand.finishReason === "MAX_TOKENS") throw {kind:"truncated"};
-  const text = ((cand.content && cand.content.parts) || []).map(p => p.text || "").join("");
-  try { return JSON.parse(text); } catch { throw {kind:"badjson"}; }
+  throw last;
 }
 let AnthropicSDK = null;
 async function claudeJSON(file, prompt, schema, signal){
@@ -1931,7 +1940,7 @@ function aiErrorCopy(e){
     }
     case "offline": return "You're offline. AI estimates need an internet connection.";
     case "refused": return "The AI declined that request. Try again, or change what you sent.";
-    case "truncated": case "badjson": return "Couldn't get a usable answer that time. Try again.";
+    case "truncated": case "badjson": return `Couldn't get a usable answer${e.model ? ` (last tried ${e.model})` : ""}. Try again, or run Test AI in Settings.`;
     case "api":
       if (e.status === 401) return "Your Anthropic API key was rejected. Check it in Settings.";
       if (e.status === 403) return "Your Anthropic API key doesn't have access to this model.";
