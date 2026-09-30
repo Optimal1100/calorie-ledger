@@ -235,6 +235,7 @@ input[type=file]:focus-visible + .drop{outline:2px solid var(--accent);outline-o
 .suggest button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;background:none;padding:10px;border-radius:10px;font-size:14px}
 .suggest button:hover,.suggest button:focus{background:var(--accent-soft);outline:none}
 .suggest small{color:var(--muted);white-space:nowrap}
+.suggest .alt{display:block;font-size:12px;color:var(--muted);white-space:normal}
 .suggest .tag{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin-right:6px;font-weight:700}
 .suggest .head{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);padding:8px 10px 4px;font-weight:700}
 .suggest .online{color:var(--accent);font-weight:700;justify-content:flex-start;gap:8px}
@@ -429,7 +430,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
     <div class="tools">
       <button type="button" class="tool-btn" id="openBarcode" aria-expanded="false" aria-controls="panelBarcode">
         <span class="ico"><svg viewBox="0 0 24 24"><path d="M3 7V4h3M18 4h3v3M21 17v3h-3M6 20H3v-3M7 8v8M10 8v8M13 8v8M16 8v8"/></svg></span>
-        <span><b>Scan barcode</b><small>Packaged foods, looked up online</small></span>
+        <span><b>Scan barcode</b><small>Swedish and international products</small></span>
       </button>
       <button type="button" class="tool-btn" id="openPhoto" aria-expanded="false" aria-controls="panelPhoto">
         <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
@@ -486,7 +487,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
           <div class="field"><label for="fF">Fat (g)</label><input id="fF" type="number" min="0" step="any" inputmode="decimal"></div>
         </div>
         <button class="primary wide" id="addBtn" type="submit">Add to Breakfast</button>
-        <span class="hint" id="servingHint">Type a food name. Press Search online for anything not in the list.</span>
+        <span class="hint" id="servingHint">Type a food name in Swedish or English. Results come from the Swedish food database.</span>
       </form>
     </section>
   </main>
@@ -635,7 +636,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
         <p class="msg" id="dataMsg"></p>
       </div>
     </section>
-    <p class="credit">Product data from <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (ODbL) and <a href="https://fdc.nal.usda.gov" target="_blank" rel="noopener">USDA FoodData Central</a>.</p>
+    <p class="credit">Food data from <a href="https://www.livsmedelsverket.se/livsmedelsdatabasen" target="_blank" rel="noopener">Livsmedelsverkets livsmedelsdatabas</a> (CC BY 4.0), <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (ODbL) and <a href="https://fdc.nal.usda.gov" target="_blank" rel="noopener">USDA FoodData Central</a>.</p>
   </main>
 </div>
 
@@ -1340,7 +1341,9 @@ function unitOptions(food){
 function qtyOf(food){
   if (food.qty) return food.qty;
   const opts = unitOptions(food);
-  return opts ? {amount:1, factor:opts[0].factor, label:opts[0].label} : {amount:1, factor:1, label:""};
+  if (!opts) return {amount:1, factor:1, label:""};
+  // With no named portion, start at 100 grams so the amount can be typed straight in grams.
+  return (food.portions || []).some(p => p.g > 0) ? {amount:1, factor:opts[0].factor, label:opts[0].label} : {amount:100, factor:0.01, label:"grams"};
 }
 function setUnitUI(food){
   const opts = unitOptions(food);
@@ -1372,7 +1375,7 @@ function updateAddBtn(){
   const total = f.kcal * q.amount * q.factor;
   $("addBtn").textContent = total ? `Add ${fmt(total)} kcal to ${mealName()}` : `Add to ${mealName()}`;
   $("servingHint").textContent = pendingBarcode ? `Barcode ${pendingBarcode} will be remembered with these values.`
-    : picked ? `${picked.source ? picked.source + ": " : ""}${picked.name}` : "Type a food name. Press Search online for anything not in the list.";
+    : picked ? `${picked.source ? picked.source + ": " : ""}${picked.name}` : "Type a food name in Swedish or English. Results come from the Swedish food database.";
 }
 function fillForm(food){
   picked = food;
@@ -1436,21 +1439,52 @@ $("fMeal").addEventListener("change", () => { updateAddBtn(); renderChips(); if 
 let searchCtl = null;
 function hideSuggest(){ $("suggest").hidden = true; if (searchCtl) searchCtl.abort(); }
 function suggestButtons(list, offset){
-  return list.map((a,i) => `<button type="button" data-sug="${offset+i}"><span>${a.tag?`<span class="tag">${esc(a.tag)}</span>`:""}${esc(a.f.name)}</span><small class="num">${fmt(a.f.kcal)} kcal${a.f.unit==="100 g"?" / 100 g":""}</small></button>`).join("");
+  return list.map((a,i) => `<button type="button" data-sug="${offset+i}"><span>${a.tag?`<span class="tag">${esc(a.tag)}</span>`:""}${esc(a.f.name)}${a.f.en ? `<span class="alt">${esc(a.f.en)}</span>` : ""}</span><small class="num">${fmt(a.f.kcal)} kcal${a.f.unit==="100 g"?" / 100 g":""}</small></button>`).join("");
+}
+// Swedish Food Agency database, bundled with the app (data/livsmedel.json) and searched on the device.
+const fold = t => String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+let seFoods = null, seLoading = null;
+function loadSwedishFoods(){
+  if (seFoods) return Promise.resolve(seFoods);
+  return seLoading ||= fetch("data/livsmedel.json").then(r => { if (!r.ok) throw 0; return r.json(); }).then(d => {
+    const ix = Object.fromEntries(d.fields.map((k,i) => [k,i]));
+    seFoods = d.foods.map(row => {
+      const m = {};
+      MICROS.forEach(mc => { const v = row[ix[mc.key]]; if (v != null) m[mc.key] = v; });
+      return {name: row[ix.sv], en: row[ix.en] || "", kcal: row[ix.kcal], p: row[ix.p] || 0, c: row[ix.c] || 0, f: row[ix.f] || 0,
+        unit: "100 g", portions: [], source: "Livsmedelsverket", m, key: fold(row[ix.sv] + " | " + (row[ix.en] || ""))};
+    });
+    return seFoods;
+  }).catch(() => { seLoading = null; return []; });
+}
+function searchSwedish(q, limit){
+  if (!seFoods) return [];
+  const fq = fold(q), words = fq.split(/\s+/).filter(Boolean), hits = [];
+  for (const f of seFoods) {
+    if (!words.every(w => f.key.includes(w))) continue;
+    // Best first: name starts with the query, then a word starts with it, then anywhere. Shorter names win ties.
+    const sv = fold(f.name), en = fold(f.en);
+    const rank = sv.startsWith(fq) || en.startsWith(fq) ? 0 : words.every(w => (" " + f.key).includes(" " + w)) ? 1 : 2;
+    hits.push([rank * 1000 + Math.min(f.name.length, 999), f]);
+  }
+  return hits.sort((x, y) => x[0] - y[0]).slice(0, limit).map(h => h[1]);
 }
 function showSuggest(){
   const q = $("fName").value.trim().toLowerCase();
   if (picked && picked.name.toLowerCase() !== q) { picked = null; setUnitUI(null); }
   if (!q) return hideSuggest();
-  const words = q.split(/\s+/);
-  const match = f => words.every(w => f.name.toLowerCase().includes(w));
-  const rec = recents().filter(match).slice(0,4).map(f => ({f, tag:"Recent"}));
+  if (!seFoods) loadSwedishFoods().then(() => { if (document.activeElement === $("fName") && $("fName").value.trim().toLowerCase() === q) showSuggest(); });
+  const words = fold(q).split(/\s+/);
+  const match = f => words.every(w => fold(f.name).includes(w));
+  const rec = recents().filter(match).slice(0,3).map(f => ({f, tag:"Recent"}));
   const seen = new Set(rec.map(r => r.f.name.toLowerCase()));
-  const lib = FOODS.filter(f => match(f) && !seen.has(f.name.toLowerCase())).slice(0, 6 - rec.length).map(f => ({f, tag:""}));
-  const all = [...rec, ...lib];
+  const se = searchSwedish(q, 10).filter(f => !seen.has(f.name.toLowerCase())).slice(0, 8).map(f => ({f, tag:""}));
+  const lib = FOODS.filter(f => match(f) && !seen.has(f.name.toLowerCase())).slice(0, 2).map(f => ({f, tag:"Quick"}));
+  const all = [...rec, ...lib, ...se];
   $("suggest")._foods = all.map(a => a.f);
-  $("suggest").innerHTML = suggestButtons(all, 0) +
-    `<button type="button" class="online" data-online="1">Search online for “${esc($("fName").value.trim())}”</button>`;
+  $("suggest").innerHTML = suggestButtons(all.slice(0, rec.length + lib.length), 0) +
+    (se.length ? `<div class="head">Swedish food database</div>` + suggestButtons(se, rec.length + lib.length) : seFoods ? "" : `<p class="note">Loading the Swedish food database…</p>`) +
+    `<button type="button" class="online" data-online="1">Search USDA online for “${esc($("fName").value.trim())}”</button>`;
   $("suggest").hidden = false;
 }
 async function searchOnline(){
@@ -1473,7 +1507,7 @@ async function searchOnline(){
   const err = generic.error || branded.error;
   if (!list.length) html += `<p class="note">${esc(err || "No matches. Try a simpler name, or enter the values yourself.")}</p>`;
   else if (err) html += `<p class="note">${esc(err)}</p>`;
-  html += `<p class="note">Source: USDA FoodData Central. Values are per 100 g; pick a portion after choosing.</p>`;
+  html += `<p class="note">Source: USDA FoodData Central (US foods and brands). Values are per 100 g; pick a portion after choosing.</p>`;
   box.innerHTML = html;
 }
 async function usdaFetch(params, signal){
@@ -1525,7 +1559,7 @@ function fromOFF(p){
   if (!p) return null;
   const n = p.nutriments || {};
   const brand = Array.isArray(p.brands) ? p.brands[0] : String(p.brands || "").split(",")[0].trim();
-  const pname = String(p.product_name || "").trim();
+  const pname = String(p.product_name_sv || p.product_name || "").trim();
   if (!pname && !brand) return null;
   const name = (brand && !pname.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${pname}` : pname || brand).trim();
   const servG = parseFloat(p.serving_quantity);
@@ -1693,10 +1727,26 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("scanne
 
 const normCode = c => String(c || "").replace(/\D/g, "");
 const codeKey = code => code.length === 13 && code[0] === "0" ? code.slice(1) : code; // UPC-A == EAN-13 with a leading 0
+// Products sold in Sweden from Open Food Facts, bundled with the app (data/barcodes-se.json) for instant, offline lookups.
+let seBarcodes = null, seBarcodesLoading = null;
+function loadSwedishBarcodes(){
+  if (seBarcodes) return Promise.resolve(seBarcodes);
+  return seBarcodesLoading ||= fetch("data/barcodes-se.json").then(r => { if (!r.ok) throw 0; return r.json(); })
+    .then(d => (seBarcodes = d.products || {})).catch(() => { seBarcodesLoading = null; return {}; });
+}
+async function bundledProduct(code){
+  const table = await loadSwedishBarcodes();
+  const row = table[code] || table[code.padStart(13, "0")] || table[code.replace(/^0+/, "")];
+  if (!row) return null;
+  const [name, kcal, p, c, f, servG, serving, fiber, sugar, satfat, sodium] = row, m = {};
+  [["fiber", fiber], ["sugar", sugar], ["satfat", satfat], ["sodium", sodium]].forEach(([k, v]) => { if (v != null) m[k] = v; });
+  return {name, kcal, p, c, f, unit: "100 g", source: "Open Food Facts", m,
+    portions: servG > 0 ? [{label: serving && /\d/.test(serving) ? serving : `serving (${Math.round(servG)} g)`, g: servG}] : []};
+}
 async function fetchOFFProduct(code){
   const tries = [code]; if (code.length === 12) tries.push("0" + code); if (code.length === 13 && code[0] === "0") tries.push(code.slice(1));
   for (const c of tries) {
-    const res = await fetch(`${OFF}/api/v2/product/${c}.json?fields=code,product_name,brands,serving_size,serving_quantity,nutriments`);
+    const res = await fetch(`${OFF}/api/v2/product/${c}.json?lc=sv&fields=code,product_name,product_name_sv,brands,serving_size,serving_quantity,nutriments`);
     if (res.status === 404) continue;
     if (!res.ok) throw new Error("http");
     const data = await res.json();
@@ -1715,10 +1765,13 @@ async function lookupCode(raw, photo){
     $("bcOut").innerHTML = `<p class="msg ok">Found ${esc(known.name)}. It's filled in below. Check the amount and add it.</p>`;
     focusAmount(); return;
   }
-  $("bcOut").innerHTML = working("Looking up the barcode in Open Food Facts…");
+  $("bcOut").innerHTML = working("Looking up the barcode…");
   let product = null, failed = false;
-  try { product = await fetchOFFProduct(code); } catch { failed = true; }
-  let food = fromOFF(product);
+  let food = await bundledProduct(code);
+  if (!food) {
+    try { product = await fetchOFFProduct(code); } catch { failed = true; }
+    food = fromOFF(product);
+  }
   if (!food) {
     $("bcOut").innerHTML = working("Checking the USDA branded food database…");
     try {

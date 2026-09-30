@@ -1,7 +1,7 @@
 // Offline support: the app shell is cached; food lookups and AI calls always go to the network.
-const CACHE = "ledger-v12";
+const CACHE = "ledger-v13";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./vendor/zxing-0.21.3.min.js",
-  "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png"];
+  "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./data/livsmedel.json"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -21,5 +21,9 @@ self.addEventListener("fetch", e => {
       .catch(() => caches.match("./index.html")));
     return;
   }
-  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request)));
+  // Everything else from this site (scripts, icons, the bundled food and barcode data): cache first, and keep what gets fetched.
+  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(r => {
+    if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
+    return r;
+  })));
 });

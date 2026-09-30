@@ -2,8 +2,8 @@
 
 A calorie and macro tracker that installs on an iPhone home screen. Plain HTML, CSS and JavaScript with no build step.
 
-- **Food search**: a built-in list of common foods, plus online search of USDA FoodData Central (generic and branded foods).
-- **Barcode scanner**: live camera scanning (ZXing), looked up in Open Food Facts first, then USDA's branded foods.
+- **Food search**: the Swedish Food Agency's food database (2,600 foods, Swedish and English names, full micronutrients) bundled in `data/livsmedel.json` and searched on the device, plus online search of USDA FoodData Central.
+- **Barcode scanner**: live camera scanning (ZXing). Looked up in a bundled table of Swedish products from Open Food Facts (`data/barcodes-se.json`), then Open Food Facts live, then USDA's branded foods.
 - **Meal photos**: AI estimates each item's calories and macros. Uses a free Google Gemini API key (aistudio.google.com/apikey) entered in the app's settings, or an Anthropic key if you set one.
 - **Storage**: everything stays on the device (localStorage). Use Export backup to keep a copy.
 
@@ -34,6 +34,15 @@ Open the link in Safari, tap Share, then **Add to Home Screen**.
 
 Edit the files, then commit and push. Opening the app while online picks up the new version. If you change anything other than `index.html`, also bump `CACHE` in `sw.js`.
 
+## Refreshing the bundled data
+
+```bash
+python3 tools/build_livsmedel.py
+python3 tools/build_barcodes_se.py
+```
+
+Then bump `CACHE` in `sw.js`, commit and push.
+
 ## Credits
 
-Barcode decoding: [ZXing](https://github.com/zxing-js/library) (Apache 2.0, in `vendor/`). Food data: [Open Food Facts](https://world.openfoodfacts.org) (ODbL) and [USDA FoodData Central](https://fdc.nal.usda.gov) (public domain).
+Barcode decoding: [ZXing](https://github.com/zxing-js/library) (Apache 2.0, in `vendor/`). Food data: [Livsmedelsverkets livsmedelsdatabas](https://www.livsmedelsverket.se/livsmedelsdatabasen) (CC BY 4.0), [Open Food Facts](https://world.openfoodfacts.org) (ODbL) and [USDA FoodData Central](https://fdc.nal.usda.gov) (public domain).
