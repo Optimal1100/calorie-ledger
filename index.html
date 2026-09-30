@@ -617,7 +617,8 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
           <label for="kUsda">USDA FoodData Central key (optional)</label>
           <input id="kUsda" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the shared demo key">
         </div>
-        <div class="row-btns"><button class="primary" type="submit">Save keys</button><button class="ghost" type="button" id="clearKeys">Remove keys</button></div>
+        <div class="row-btns"><button class="primary" type="submit">Save keys</button><button class="ghost" type="button" id="aiTest">Test AI</button><button class="ghost" type="button" id="clearKeys">Remove keys</button></div>
+        <div id="aiTestOut"></div>
         <span class="hint">Keys stay on this device and are sent only to the service they belong to. Get a free Gemini key at aistudio.google.com/apikey (no card needed). On the free tier, Google may use your photos to improve its products. Food search works without a USDA key, but the shared one only allows a handful of searches an hour; a free personal key from api.data.gov/signup allows 1,000.</span>
       </form>
     </section>
@@ -711,7 +712,7 @@ const r1 = n => Math.round((+n || 0)*10)/10;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const num = (v, d=0) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 ? n : d; };
 const uid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36);
-const working = t => `<div class="working"><span class="spin"></span>${esc(t)}</div>`;
+const working = t => `<div class="working"><span class="spin"></span><span>${esc(t)} <span class="ai-note"></span></span></div>`;
 const titleCase = s => s.toLowerCase().replace(/(^|[\s,(\/-])([a-z])/g, (m,a,b) => a + b.toUpperCase());
 
 // ---------- storage (this device) ----------
@@ -1480,6 +1481,10 @@ async function usdaFetch(params, signal){
     (Array.isArray(v) ? v : [v]).map(x => `${k}=${encodeURIComponent(x)}`)).join("&");
   const res = await fetch("https://api.nal.usda.gov/fdc/v1/foods/search?" + qs, {signal});
   if (res.status === 429) throw {limit:true};
+  if (res.status === 403) throw {badKey:true};
+  // USDA's gateway sometimes rejects the "Survey (FNDDS)" dataset from browsers. Search again without it.
+  if (res.status === 400 && Array.isArray(params.dataType) && params.dataType.includes("Survey (FNDDS)"))
+    return usdaFetch({...params, dataType: params.dataType.filter(t => t !== "Survey (FNDDS)")}, signal);
   if (!res.ok) throw {http:res.status};
   return res.json();
 }
@@ -1490,7 +1495,8 @@ async function searchUSDA(q, dataType, pageSize, signal){
   } catch (e) {
     if (signal && signal.aborted) return {items:[]};
     if (e && e.limit) return {items:[], error:"The shared USDA search key has hit its hourly limit. Get your own free key at api.data.gov/signup and paste it in Settings, or try again in an hour."};
-    return {items:[], error: e && e.http ? "USDA search is unavailable right now." : "Couldn't reach USDA. Check your connection."};
+    if (e && e.badKey) return {items:[], error: keys.usda ? "USDA rejected your key. Check it in Settings (new keys can take a few minutes to activate), or clear the field to use the shared key." : "USDA rejected the shared search key. Add your own free key in Settings."};
+    return {items:[], error: e && e.http ? `USDA search is unavailable right now (error ${e.http}).` : "Couldn't reach USDA. Check your connection."};
   }
 }
 function fromUSDA(f){
@@ -1757,7 +1763,25 @@ $("bcLookup").addEventListener("click", () => lookupCode($("bcCode").value));
 $("bcCode").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupCode($("bcCode").value); } });
 
 // --- AI vision: Google Gemini (free tier) by default, or Claude when an Anthropic key is set ---
-const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"];
+const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash"];
+const MODEL_KEY = "calorie-ledger-model";
+let geminiPreferred = ""; try { geminiPreferred = localStorage.getItem(MODEL_KEY) || ""; } catch {}
+const aiNote = t => document.querySelectorAll(".ai-note").forEach(el => { el.textContent = t; });
+// One request to one model, given up on after timeoutMs. Never throws except when the caller cancels.
+async function geminiCall(model, body, signal, timeoutMs){
+  const ctl = new AbortController(), t0 = Date.now(); let timedOut = false;
+  const onAbort = () => ctl.abort(); if (signal) signal.addEventListener("abort", onAbort);
+  const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, timeoutMs);
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST", signal: ctl.signal, headers: {"content-type": "application/json", "x-goog-api-key": keys.gemini}, body: JSON.stringify(body)});
+    const data = await res.json().catch(() => null);
+    return {ok: res.ok, status: res.status, data, detail: String((data && data.error && data.error.message) || "").slice(0, 160), ms: Date.now() - t0};
+  } catch (e) {
+    if (signal && signal.aborted) throw {kind:"cancelled"};
+    return {ok:false, status: timedOut ? 408 : 0, data:null, detail: timedOut ? `no answer within ${Math.round(timeoutMs/1000)} s` : "network error", ms: Date.now() - t0};
+  } finally { clearTimeout(timer); if (signal) signal.removeEventListener("abort", onAbort); }
+}
 // `file` is an image to look at, or null for a text-only request.
 async function aiJSON(file, prompt, schema, signal){
   if (keys.anthropic) return claudeJSON(file, prompt, schema, signal);
@@ -1774,33 +1798,24 @@ function geminiSchema(x){
 }
 async function geminiJSON(file, prompt, schema, signal){
   const parts = file ? [{inline_data: {mime_type: "image/jpeg", data: await toJpegBase64(file, 1568)}}, {text: prompt}] : [{text: prompt}];
-  const body = JSON.stringify({
-    contents: [{role: "user", parts}],
-    generationConfig: {responseMimeType: "application/json", responseSchema: geminiSchema(schema)}
-  });
-  // The newest free model is often overloaded, so retry once and then fall back to the next model.
-  let res = null, last = {kind:"gemini", status:0};
-  outer: for (const model of GEMINI_MODELS) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: "POST", signal, headers: {"content-type": "application/json", "x-goog-api-key": keys.gemini}, body});
-      } catch (e) {
-        if (signal && signal.aborted) throw {kind:"cancelled"};
-        throw {kind: navigator.onLine === false ? "offline" : "gemini", status: 0};
-      }
-      if (res.ok) break outer;
-      let detail = "";
-      try { const j = await res.json(); detail = String((j.error && j.error.message) || ""); } catch {}
-      last = {kind:"gemini", status: res.status, model, detail: detail.slice(0, 160), badKey: /API key not valid|API_KEY_INVALID/i.test(detail)};
-      res = null;
-      if (last.badKey || last.status === 401 || last.status === 403) throw last;
-      if (last.status >= 500 && attempt === 0) { await new Promise(r => setTimeout(r, 1500)); if (signal && signal.aborted) throw {kind:"cancelled"}; continue; }
-      break; // 429, 404, 400 or a second 5xx: try the next model
-    }
+  const config = {responseMimeType: "application/json", responseSchema: geminiSchema(schema)};
+  const timeout = file ? 75000 : 45000;
+  // Start with the model that answered last time; if one is overloaded, slow or out of free quota, move straight to the next.
+  const order = [...new Set([geminiPreferred, ...GEMINI_MODELS].filter(Boolean))];
+  let last = {kind:"gemini", status:0}, data = null;
+  for (const model of order) {
+    aiNote(`Asking ${model}…`);
+    // Low thinking keeps answers fast; a model that doesn't accept the setting gets the request again without it.
+    let r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: {...config, thinkingConfig: {thinkingLevel: "low"}}}, signal, timeout);
+    if (r.status === 400 && !/API key/i.test(r.detail)) r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: config}, signal, timeout);
+    if (r.ok) { data = r.data; if (geminiPreferred !== model) { geminiPreferred = model; try { localStorage.setItem(MODEL_KEY, model); } catch {} } break; }
+    last = {kind:"gemini", status: r.status, model, detail: r.detail, badKey: /API key not valid|API_KEY_INVALID/i.test(r.detail)};
+    if (last.badKey || r.status === 401) throw last;
+    if (r.status === 0 && navigator.onLine === false) throw {kind:"offline"};
+    aiNote(`${model} didn't answer, trying another…`);
   }
-  if (!res) throw last;
-  const data = await res.json();
+  aiNote("");
+  if (!data) throw last;
   const cand = (data.candidates || [])[0];
   if (!cand || (data.promptFeedback && data.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCK/.test(cand.finishReason || "")) throw {kind:"refused"};
   if (cand.finishReason === "MAX_TOKENS") throw {kind:"truncated"};
@@ -1843,6 +1858,7 @@ function aiErrorCopy(e){
       if (e.status === 429) return "You've hit Gemini's free limit for now. Wait a minute and try again; if it keeps happening, the daily allowance resets tomorrow." + why;
       if (e.status === 404) return "None of the Gemini models this app knows are available to your key." + why;
       if (e.status >= 500) return "Gemini's servers are overloaded right now, on every model the app tried. Try again in a few minutes." + why;
+      if (e.status === 408) return "Gemini took too long to answer on every model the app tried. Try again in a few minutes, or run Test AI in Settings.";
       if (e.status === 400) return "Gemini couldn't process that request." + why;
       return "Couldn't reach Gemini. Check your connection and try again.";
     }
@@ -1992,6 +2008,27 @@ $("mealOut").addEventListener("click", e => {
   $("mealThumb").outerHTML = `<span class="ph" id="mealThumb"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>`;
   $("mealDropTitle").textContent = "Take or choose a photo of your meal";
   $("mealNote").value = ""; setMealMsg("Logged. Snap another meal any time.", "ok"); refreshPhotoUI();
+});
+
+// ---------- AI self-test: ask each model a tiny question and show what comes back ----------
+$("aiTest").addEventListener("click", async () => {
+  const out = $("aiTestOut"), key = $("kGemini").value.trim();
+  if (key && key !== keys.gemini) { keys = {...keys, gemini: key}; saveKeys(); }
+  if (!keys.gemini) { out.innerHTML = `<p class="msg err">Paste your Gemini key above first.</p>`; return; }
+  $("aiTest").disabled = true; out.innerHTML = working("Testing each Gemini model…");
+  const body = {contents: [{role: "user", parts: [{text: 'Reply with the JSON {"ok": true}.'}]}], generationConfig: {responseMimeType: "application/json", responseSchema: {type:"object", properties:{ok:{type:"boolean"}}, required:["ok"]}}};
+  const rows = []; let best = null;
+  for (const model of GEMINI_MODELS) {
+    aiNote(model);
+    const r = await geminiCall(model, body, null, 25000);
+    const secs = (r.ms / 1000).toFixed(1);
+    if (r.ok) { rows.push(`<p class="msg ok">${model}: working (${secs} s)</p>`); if (!best || r.ms < best.ms) best = {model, ms: r.ms}; }
+    else rows.push(`<p class="msg err">${model}: ${r.status === 429 ? "free limit reached" : r.status === 404 ? "not available to your key" : r.status === 408 ? "too slow" : r.status >= 500 ? "overloaded" : r.status === 0 ? "couldn't connect" : "rejected"} (${r.status || "no response"}, ${secs} s)${r.detail ? ". Google said: " + esc(r.detail) : ""}</p>`);
+    if (/API key not valid/i.test(r.detail)) break;
+  }
+  if (best) { geminiPreferred = best.model; try { localStorage.setItem(MODEL_KEY, best.model); } catch {} rows.push(`<p class="msg">The app will use ${best.model} first from now on.</p>`); }
+  else rows.push(`<p class="msg">No model answered. If every line says the free limit is reached, the allowance resets daily. If it says the key isn't valid, copy it again from aistudio.google.com/apikey.</p>`);
+  out.innerHTML = rows.join(""); $("aiTest").disabled = false;
 });
 
 // ---------- review: an AI coach reads the day's log ----------
