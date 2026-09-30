@@ -56,7 +56,7 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 
 /* Top bar */
 .top{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px}
-h1{font:900 clamp(19px,5.6vw,26px)/1.05 var(--display);font-stretch:100%;letter-spacing:-.015em;margin:0;min-width:0;white-space:nowrap}
+h1{font:900 clamp(22px,6.4vw,28px)/1.05 var(--display);font-stretch:100%;letter-spacing:-.015em;margin:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .datenav{flex:none}
 .datenav{display:flex;align-items:center;gap:2px;background:var(--card);border-radius:999px;padding:3px;box-shadow:var(--shadow)}
 .datenav .day{font:700 14px/1 var(--display);min-width:9ch;text-align:center;padding:0 2px}
@@ -64,7 +64,7 @@ h1{font:900 clamp(19px,5.6vw,26px)/1.05 var(--display);font-stretch:100%;letter-
 .icon-btn:hover{background:var(--field)}
 .icon-btn[disabled]{opacity:.3;cursor:default}
 .pill-btn{border:0;background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:8px 12px;font-size:13px;font-weight:700;margin-left:2px}
-.pill-btn[disabled]{display:none}
+.pill-btn{display:none}
 body[data-view="settings"] .datenav{display:none}
 
 .card{background:var(--card);border-radius:var(--r);padding:18px;box-shadow:var(--shadow)}
@@ -94,6 +94,50 @@ body[data-view="settings"] .datenav{display:none}
 .macro .v small{font:500 11px var(--body);color:var(--hero-muted)}
 .bar{height:5px;border-radius:3px;background:var(--hero-track);overflow:hidden}
 .bar i{display:block;height:100%;border-radius:3px;transition:width .5s ease}
+
+/* Activity */
+.act-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.act-tile{background:var(--card);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);display:grid;gap:4px}
+.act-tile b{font:800 28px/1 var(--display);font-stretch:92%}
+.act-tile b small{font:600 13px var(--body);color:var(--muted)}
+.act-tile span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.act-tile .mbar{margin-top:6px}
+.act-tile em{font-style:normal;font-size:12px;color:var(--muted)}
+.act-hero{background:linear-gradient(150deg,var(--hero-2),var(--hero) 62%);color:var(--hero-fg);box-shadow:0 14px 34px rgba(15,53,41,.28)}
+.act-hero span,.act-hero em,.act-hero b small{color:var(--hero-muted)}
+.act-hero .mbar{background:var(--hero-track)}
+.act-hero .mbar i{background:var(--hero-prog)}
+.tl svg{display:block;width:100%;height:auto}
+.tl text{fill:var(--muted);font:10px var(--body)}
+.tl .c1{fill:var(--line)} .tl .c2{fill:color-mix(in srgb,var(--accent) 22%,var(--line))} .tl .c3{fill:color-mix(in srgb,var(--accent) 50%,var(--line))} .tl .c4{fill:var(--accent)} .tl .c5{fill:var(--carbs)}
+.tl .wk{fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin-top:10px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.stackbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line)}
+.stackbar i{display:block;height:100%}
+.zone{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;font-size:14px;padding:6px 0}
+.zone i{width:10px;height:10px;border-radius:3px}
+.zone b{font:800 14px var(--display)}
+.wo{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.wo:first-of-type{border-top:0;padding-top:0}
+.wo:last-child{padding-bottom:0}
+.wo h4{margin:0;font:800 16px/1.2 var(--display)}
+.wo .when{font-size:12px;color:var(--muted)}
+.wo .facts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.wo .facts span{background:var(--field);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700}
+.wo .facts span.int{background:var(--accent-soft);color:var(--accent);text-transform:capitalize}
+.balance{display:grid;gap:10px}
+.balance .row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:10px;align-items:center;font-size:13px}
+.balance .row b{font:800 15px var(--display)}
+.balance .mbar{height:10px;border-radius:5px}
+.balance .mbar i{border-radius:5px}
+.balance .burn i{background:var(--carbs)}
+.gear{width:40px;height:40px;border-radius:50%;border:0;background:var(--card);display:grid;place-items:center;box-shadow:var(--shadow);flex:none}
+.gear svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.gear[aria-pressed="true"]{background:var(--accent-soft)}
+.gear[aria-pressed="true"] svg{stroke:var(--accent)}
+.top-right{display:flex;align-items:center;gap:8px;flex:none}
+button.day{border:0;background:none}
 
 /* Oura card */
 .body-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}
@@ -345,11 +389,14 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
 <div class="wrap">
   <header class="top">
     <h1 id="viewTitle">Calorie Ledger</h1>
-    <div class="datenav">
-      <button class="icon-btn" id="prev" aria-label="Previous day">‹</button>
-      <div class="day" id="dayLabel">Today</div>
-      <button class="icon-btn" id="next" aria-label="Next day">›</button>
-      <button class="pill-btn" id="today">Today</button>
+    <div class="top-right">
+      <div class="datenav">
+        <button class="icon-btn" id="prev" aria-label="Previous day">‹</button>
+        <button type="button" class="day" id="dayLabel" title="Back to today">Today</button>
+        <button class="icon-btn" id="next" aria-label="Next day">›</button>
+        <button class="pill-btn" id="today">Today</button>
+      </div>
+      <button type="button" class="gear" id="settingsBtn" aria-label="Settings" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button>
     </div>
   </header>
 
@@ -460,6 +507,9 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
     </section>
     <section class="label" aria-label="Nutrition facts for the day" id="label"></section>
   </main>
+
+  <!-- ACTIVITY -->
+  <main class="view" id="view-activity" hidden><div id="actOut" class="view" style="animation:none"></div></main>
 
   <!-- REVIEW -->
   <main class="view" id="view-review" hidden>
@@ -591,8 +641,8 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
   <button type="button" data-tab="today"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Today</button>
   <button type="button" data-tab="trends"><svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V4M19 20v-6"/></svg>Trends</button>
   <button type="button" data-tab="add" class="plus"><span class="bubble"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Add</button>
+  <button type="button" data-tab="activity"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.500-6 4 12 2.500-6H21"/></svg>Activity</button>
   <button type="button" data-tab="review"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.100 1.900L12 17l-1.900-5.100L5 10l5.100-1.900zM18.500 15.500l.8 2.200 2.200.8-2.200.8-.8 2.200-.8-2.200-2.200-.8 2.200-.8z"/></svg>Review</button>
-  <button type="button" data-tab="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Settings</button>
 </nav>
 
 <div class="scanner" id="scanner" hidden>
@@ -812,6 +862,96 @@ $("bodyCard").addEventListener("click", e => {
   } else { delete state.dayTargets[k]; toast("Back to your usual targets"); }
   persist(); render();
 });
+const WORKOUT_ICONS = [
+  [/strength|weight|lift|crossfit|hiit|circuit|core|boxing|calisthenics/i, '<path d="M4 9v6M7 6.500v11M17 6.500v11M20 9v6M7 12h10"/>'],
+  [/run|jog|sprint/i, '<circle cx="14.500" cy="4.500" r="1.800"/><path d="M6 20l4-4 1-4.500 4 3 1 5.500M9 9l3-2 3 2 2 3"/>'],
+  [/walk|hik/i, '<circle cx="12.500" cy="4.500" r="1.800"/><path d="M9 21l2-6 1-5 3 3 1 8M8 12l4-3"/>'],
+  [/cycl|bik|spin/i, '<circle cx="6" cy="16" r="3.500"/><circle cx="18" cy="16" r="3.500"/><path d="M6 16l4-7h5l3 7M10 9l2 7"/>'],
+  [/swim|surf|row|paddl|kayak/i, '<path d="M3 17c2 0 2-1.500 4.500-1.500S10 17 12 17s2-1.500 4.500-1.500S19 17 21 17M7 11l4-3 3 3 3-1"/><circle cx="17" cy="6" r="1.600"/>'],
+  [/yoga|stretch|pilates|mobility/i, '<circle cx="12" cy="5" r="1.800"/><path d="M12 8v6M5 11l7 1 7-1M8 20l4-6 4 6"/>']
+];
+const workoutIcon = a => (WORKOUT_ICONS.find(([re]) => re.test(a)) || [0, '<path d="M3 12h4l2.500-6 4 12 2.500-6H21"/>'])[1];
+const prettyActivity = a => { const t = String(a || "Workout").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
+const clock = iso => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString(undefined, {hour:"numeric", minute:"2-digit"}); };
+const minsText = m => m >= 60 ? `${Math.floor(m/60)} h ${Math.round(m%60)} min` : `${Math.round(m)} min`;
+function distText(m){
+  if (!(m > 0)) return "";
+  return state.profile.units === "imperial" ? `${(m/1609.34).toFixed(m < 1609 ? 2 : 1)} mi` : m < 1000 ? `${Math.round(m)} m` : `${(m/1000).toFixed(1)} km`;
+}
+function renderActivity(){
+  const out = $("actOut"), k = state.date, o = state.oura.days[k], isToday = k === keyOf(new Date());
+  if (!ouraOn() && !Object.keys(state.oura.days).length) {
+    out.innerHTML = `<section class="card stack"><p class="msg">Connect your Oura ring to see calories burned, steps and workouts here.</p><div class="row-btns"><button type="button" class="primary" data-go="settings">Connect Oura in Settings</button></div></section>`; return;
+  }
+  const gen = Date.parse(state.oura.generated), fresh = gen ? `Mac uploaded ${ago(gen)}` : "";
+  if (!o || (o.steps == null && o.active_kcal == null && !(o.workout_list || []).length)) {
+    out.innerHTML = `<section class="card stack"><p class="msg">No Oura activity for ${esc(dayName(k))} yet. It appears after your ring syncs to the Oura app and your Mac's next upload.</p><span class="hint">${esc(fresh)}</span></section>`; return;
+  }
+  const pcBar = (v, of) => of > 0 ? `<div class="mbar"><i style="width:${Math.min(100, v/of*100)}%"></i></div>` : "";
+  let html = `<div class="act-grid">
+    <div class="act-tile act-hero"><span>Active burn</span><b class="num">${fmt(o.active_kcal || 0)}<small> kcal</small></b>${o.target_kcal ? pcBar(o.active_kcal || 0, o.target_kcal) + `<em>${Math.round((o.active_kcal || 0) / o.target_kcal * 100)}% of Oura's ${fmt(o.target_kcal)} kcal goal</em>` : ""}</div>
+    <div class="act-tile act-hero"><span>Total burn${isToday ? " so far" : ""}</span><b class="num">${o.total_kcal != null ? fmt(o.total_kcal) : "–"}<small> kcal</small></b><em>Resting plus active</em></div>
+    <div class="act-tile"><span>Steps</span><b class="num">${o.steps != null ? fmt(o.steps) : "–"}</b>${o.walk_m ? `<em>About ${distText(o.walk_m)} of walking</em>` : ""}</div>
+    <div class="act-tile"><span>Activity score</span><b class="num">${o.activity_score != null ? fmt(o.activity_score) : "–"}<small> / 100</small></b>${o.inactivity_alerts != null ? `<em>${fmt(o.inactivity_alerts)} inactivity ${o.inactivity_alerts === 1 ? "alert" : "alerts"}</em>` : ""}</div>
+  </div>`;
+
+  // Workouts
+  const ws = o.workout_list || [];
+  html += `<section class="card"><div class="body-head"><p class="eyebrow">Workouts</p><span>${ws.length ? `${ws.length} recorded` : ""}</span></div>` +
+    (ws.length ? ws.map(w => {
+      const st = new Date(w.start), en = new Date(w.end), mins = (en - st) / 60000;
+      const showDist = w.distance_m > 0 && /run|walk|hik|cycl|bik|swim|row|ski|skat/i.test(w.activity);
+      return `<div class="wo"><span class="meal-ico"><svg viewBox="0 0 24 24">${workoutIcon(w.activity)}</svg></span><div>
+        <h4>${esc(w.label || prettyActivity(w.activity))}</h4><div class="when">${esc(clock(w.start))} – ${esc(clock(w.end))}</div>
+        <div class="facts">${mins > 0 ? `<span>${minsText(mins)}</span>` : ""}${w.kcal != null ? `<span class="num">${fmt(w.kcal)} kcal</span>` : ""}${showDist ? `<span>${distText(w.distance_m)}</span>` : ""}${w.intensity ? `<span class="int">${esc(w.intensity)}</span>` : ""}</div></div></div>`;
+    }).join("") : `<p class="msg">${o.workouts ? esc(o.workouts) : `No workouts recorded by Oura for ${esc(dayName(k))}.`}</p>`) + `</section>`;
+
+  // Through the day: one bar per 5 minutes, starting when Oura's day starts (4am)
+  if (o.class5 && o.class5_start) {
+    const t0 = new Date(o.class5_start), n = o.class5.length, W = 360, H = 96, top = 12, base = 74, bw = W / 288;
+    let bars = "";
+    for (let i = 0; i < n; i++) { const c = +o.class5[i]; if (c >= 1) { const h = c === 1 ? 3 : (c - 1) * 15; bars += `<rect class="c${c}" x="${(i*bw).toFixed(2)}" y="${base - h}" width="${(bw*0.86).toFixed(2)}" height="${h}" rx="0.500"/>`; } }
+    let ticks = "";
+    for (let hr = 0; hr < 24; hr += 3) { const d = new Date(t0.getTime() + hr*3600e3); ticks += `<text x="${hr*12*bw + 1}" y="${H - 6}">${d.toLocaleTimeString(undefined,{hour:"numeric"}).replace(/\s/g,"").toLowerCase()}</text>`; }
+    const marks = ws.map(w => { const a = (new Date(w.start) - t0) / 300e3 * bw, b = (new Date(w.end) - t0) / 300e3 * bw; return a >= 0 && b <= W + 1 ? `<path class="wk" d="M${a.toFixed(1)} ${top - 6}H${Math.max(b, a + 2).toFixed(1)}"/>` : ""; }).join("");
+    html += `<section class="card tl"><div class="body-head"><p class="eyebrow">Through the day</p><span>${ws.length ? "Black line = workout" : ""}</span></div>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Activity level through the day">${marks}${bars}${ticks}</svg>
+      <div class="legend"><span><i class="sw" style="background:var(--carbs)"></i>High</span><span><i style="background:var(--accent)"></i>Medium</span><span><i style="background:color-mix(in srgb,var(--accent) 50%,var(--line))"></i>Low</span><span><i style="background:color-mix(in srgb,var(--accent) 22%,var(--line))"></i>Sitting</span><span><i style="background:var(--line)"></i>Rest</span></div></section>`;
+  }
+
+  // Time in each zone
+  const zones = [["High", o.high_activity_min, "var(--carbs)"], ["Medium", o.medium_activity_min, "var(--accent)"], ["Low", o.low_activity_min, "color-mix(in srgb,var(--accent) 50%,var(--line))"],
+    ["Sitting", o.sedentary_h != null ? o.sedentary_h * 60 : null, "color-mix(in srgb,var(--accent) 22%,var(--line))"], ["Rest and sleep", o.rest_min, "var(--line)"]].filter(z => z[1] != null);
+  const tot = zones.reduce((a,z) => a + z[1], 0);
+  if (tot > 0) html += `<section class="card"><p class="eyebrow">Time moving</p><div class="stackbar">${zones.map(z => `<i style="width:${z[1]/tot*100}%;background:${z[2]}"></i>`).join("")}</div>
+    <div style="margin-top:8px">${zones.map(z => `<div class="zone"><i style="background:${z[2]}"></i><span>${z[0]}</span><b class="num">${minsText(z[1])}</b></div>`).join("")}</div></section>`;
+
+  // Eaten vs burned
+  if (o.total_kcal > 0) {
+    const eaten = totals(entriesFor(k)).kcal, mx = Math.max(eaten, o.total_kcal), diff = Math.round(eaten - o.total_kcal);
+    html += `<section class="card"><p class="eyebrow">Energy balance</p><div class="balance">
+      <div class="row"><span>Eaten</span><div class="mbar"><i style="width:${mx ? eaten/mx*100 : 0}%"></i></div><b class="num">${fmt(eaten)}</b></div>
+      <div class="row burn"><span>Burned</span><div class="mbar"><i style="width:${o.total_kcal/mx*100}%"></i></div><b class="num">${fmt(o.total_kcal)}</b></div>
+      <p class="msg">${eaten ? `You've eaten <b>${fmt(Math.abs(diff))} kcal ${diff < 0 ? "less" : "more"}</b> than you've burned${isToday ? " so far today. Both numbers keep moving until the day ends." : "."}` : "Nothing logged to compare yet."}</p></div></section>`;
+  }
+
+  // Last 7 days
+  const wk = Array.from({length:7}, (_,i) => shift(k, i-6)), av = wk.map(d => (state.oura.days[d] || {}).active_kcal || 0), sv = wk.map(d => (state.oura.days[d] || {}).steps || 0);
+  const mxA = Math.max(...av, 1), W = 360, H = 150, slot = W / 7, bw = slot * 0.56, ih = 92;
+  html += `<section class="card chart"><div class="week-head"><p class="eyebrow" style="margin:0">7 days</p><span class="avg">Active kcal, steps below</span></div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Active calories and steps for the last 7 days">` +
+    wk.map((d,i) => { const h = av[i] / mxA * ih, x = slot*i + (slot - bw)/2, sel = d === k;
+      return `<rect class="b ${sel ? "sel" : ""}" data-day="${d}" x="${x}" y="${18 + ih - h}" width="${bw}" height="${Math.max(h, av[i] ? 2 : 0)}" rx="6"/>` +
+        (av[i] ? `<text class="val num" x="${x + bw/2}" y="${18 + ih - h - 5}" text-anchor="middle">${fmt(av[i])}</text>` : "") +
+        `<text class="dl ${sel ? "sel" : ""}" x="${x + bw/2}" y="${H - 22}" text-anchor="middle">${parseKey(d).toLocaleDateString(undefined,{weekday:"short"})}</text>` +
+        `<text class="num" x="${x + bw/2}" y="${H - 8}" text-anchor="middle">${sv[i] ? (sv[i] >= 1000 ? (sv[i]/1000).toFixed(1) + "k" : sv[i]) : "–"}</text>`; }).join("") + `</svg></section>`;
+  html += `<p class="credit">${esc(fresh)}${isToday ? " · today's numbers update with each upload" : ""}</p>`;
+  out.innerHTML = html;
+}
+$("actOut").addEventListener("click", e => {
+  if (e.target.closest("[data-go]")) return show("settings");
+  const b = e.target.closest("[data-day]"); if (b) { state.date = b.dataset.day; render(); }
+});
+
 function ouraText(k){
   const o = state.oura.days[k]; if (!o) return "";
   const bits = [];
@@ -820,7 +960,8 @@ function ouraText(k){
   add(o.total_sleep_h, v => `slept ${v} h${o.deep_h != null ? ` (deep ${o.deep_h} h, REM ${o.rem_h ?? "?"} h)` : ""}`);
   add(o.avg_hrv_ms, v => `overnight HRV ${v} ms`); add(o.lowest_hr, v => `lowest heart rate ${v} bpm`); add(o.temp_deviation_c, v => `body temperature deviation ${v} C`);
   add(o.steps, v => `${v} steps`); add(o.active_kcal, v => `active burn ${v} kcal`); add(o.total_kcal, v => `total burn ${v} kcal`);
-  add(o.workouts, v => `workouts: ${v}`); add(o.stress_day_summary, v => `daytime stress: ${v}`);
+  if ((o.workout_list || []).length) bits.push(`workouts: ${o.workout_list.map(w => `${prettyActivity(w.activity)} ${clock(w.start)}-${clock(w.end)}${w.kcal != null ? `, ${w.kcal} kcal` : ""}${w.intensity ? `, ${w.intensity} intensity` : ""}`).join("; ")}`);
+  else add(o.workouts, v => `workouts: ${v}`); add(o.stress_day_summary, v => `daytime stress: ${v}`);
   const usual = usualActive(k), avgOf = key => { const vs = []; for (let i = 1; i <= 14; i++) { const d = state.oura.days[shift(k, -i)]; if (d && d[key] != null) vs.push(d[key]); } return vs.length >= 4 ? Math.round(vs.reduce((a,b) => a + b, 0) / vs.length * 10) / 10 : null; };
   const norms = [["usual active burn", usual, "kcal"], ["average sleep", avgOf("total_sleep_h"), "h"], ["average readiness", avgOf("readiness_score"), ""], ["average HRV", avgOf("avg_hrv_ms"), "ms"]].filter(x => x[1] != null).map(x => `${x[0]} ${x[1]} ${x[2]}`.trim());
   return bits.join(", ") + (norms.length ? `. Their recent norms: ${norms.join(", ")}` : "");
@@ -941,18 +1082,21 @@ async function enrichDay(k){
 document.addEventListener("click", e => { if (e.target.id === "enrichRetry") queueEnrich(true); });
 
 // ---------- views ----------
-const VIEW_TITLES = {today:"Calorie Ledger", add:"Add food", trends:"Trends", review:"Review", settings:"Settings"};
+const VIEW_TITLES = {today:"Ledger", add:"Add food", trends:"Trends", activity:"Activity", review:"Review", settings:"Settings"};
 function show(v, keepScroll){
   if (!VIEW_TITLES[v]) v = "today";
   document.body.dataset.view = v;
   Object.keys(VIEW_TITLES).forEach(k => { $("view-"+k).hidden = k !== v; });
   document.querySelectorAll(".tabbar button").forEach(b => b.dataset.tab === v ? b.setAttribute("aria-current","page") : b.removeAttribute("aria-current"));
   $("viewTitle").textContent = VIEW_TITLES[v];
+  $("settingsBtn").setAttribute("aria-pressed", v === "settings");
   if (!keepScroll) window.scrollTo(0, 0);
   if (v === "trends" || v === "review") queueEnrich();
+  if (v === "activity" && ouraOn() && Date.now() - state.oura.fetched > 5 * 60000) syncOura();
   try { history.replaceState(null, "", "#" + v); } catch {}
 }
 document.querySelector(".tabbar").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) show(b.dataset.tab); });
+$("settingsBtn").addEventListener("click", () => show(document.body.dataset.view === "settings" ? "today" : "settings"));
 
 // ---------- render ----------
 function render(){
@@ -1003,7 +1147,7 @@ function render(){
     return `<section class="mealcard"><div class="meal-head"><span class="meal-ico"><svg viewBox="0 0 24 24">${MEAL_ICONS[k]}</svg></span><div class="grow"><h3>${n}</h3><div class="sub num">${list.length ? `${fmt(mt.kcal)} kcal · ${list.length} ${list.length===1?"item":"items"}` : "Nothing logged yet"}</div></div><button class="add" data-meal="${k}" aria-label="Add to ${n}">+</button></div>${list.length ? `<ul class="entries">${items}</ul>` : ""}</section>`;
   }).join("");
 
-  renderChips(); renderWeek(); renderMicros(); renderBody(); updateAddBtn(); renderDataInfo(); renderReview();
+  renderChips(); renderWeek(); renderMicros(); renderBody(); renderActivity(); updateAddBtn(); renderDataInfo(); renderReview();
 }
 
 function renderChips(){
@@ -1305,6 +1449,7 @@ $("chart").addEventListener("click", e => { const b = e.target.closest("[data-da
 $("prev").addEventListener("click", () => { state.date = shift(state.date,-1); rvError = ""; render(); });
 $("next").addEventListener("click", () => { if (state.date < keyOf(new Date())) { state.date = shift(state.date,1); render(); } });
 $("today").addEventListener("click", () => { state.date = keyOf(new Date()); $("fMeal").value = defaultMeal(); render(); });
+$("dayLabel").addEventListener("click", () => $("today").click());
 // Coming back to the app on a new day should land on today.
 let lastToday = keyOf(new Date());
 document.addEventListener("visibilitychange", () => {
