@@ -1006,7 +1006,7 @@ $("bcLookup").addEventListener("click", () => lookupCode($("bcCode").value));
 $("bcCode").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupCode($("bcCode").value); } });
 
 // --- AI vision: Google Gemini (free tier) by default, or Claude when an Anthropic key is set ---
-const GEMINI_MODEL = "gemini-3.8-flash";
+const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"];
 async function aiJSON(file, prompt, schema, signal){
   if (keys.anthropic) return claudeJSON(file, prompt, schema, signal);
   if (keys.gemini) return geminiJSON(file, prompt, schema, signal);
@@ -1022,25 +1022,32 @@ function geminiSchema(x){
 }
 async function geminiJSON(file, prompt, schema, signal){
   const image = await toJpegBase64(file, 1568);
-  let res;
-  try {
-    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
-      method: "POST", signal,
-      headers: {"content-type": "application/json", "x-goog-api-key": keys.gemini},
-      body: JSON.stringify({
-        contents: [{role: "user", parts: [{inline_data: {mime_type: "image/jpeg", data: image}}, {text: prompt}]}],
-        generationConfig: {responseMimeType: "application/json", responseSchema: geminiSchema(schema)}
-      })
-    });
-  } catch (e) {
-    if (signal && signal.aborted) throw {kind:"cancelled"};
-    throw {kind: navigator.onLine === false ? "offline" : "gemini", status: 0};
+  const body = JSON.stringify({
+    contents: [{role: "user", parts: [{inline_data: {mime_type: "image/jpeg", data: image}}, {text: prompt}]}],
+    generationConfig: {responseMimeType: "application/json", responseSchema: geminiSchema(schema)}
+  });
+  // The newest free model is often overloaded, so retry once and then fall back to the next model.
+  let res = null, last = {kind:"gemini", status:0};
+  outer: for (const model of GEMINI_MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: "POST", signal, headers: {"content-type": "application/json", "x-goog-api-key": keys.gemini}, body});
+      } catch (e) {
+        if (signal && signal.aborted) throw {kind:"cancelled"};
+        throw {kind: navigator.onLine === false ? "offline" : "gemini", status: 0};
+      }
+      if (res.ok) break outer;
+      let detail = "";
+      try { const j = await res.json(); detail = String((j.error && j.error.message) || ""); } catch {}
+      last = {kind:"gemini", status: res.status, model, detail: detail.slice(0, 160), badKey: /API key not valid|API_KEY_INVALID/i.test(detail)};
+      res = null;
+      if (last.badKey || last.status === 401 || last.status === 403) throw last;
+      if (last.status >= 500 && attempt === 0) { await new Promise(r => setTimeout(r, 1500)); if (signal && signal.aborted) throw {kind:"cancelled"}; continue; }
+      break; // 429, 404, 400 or a second 5xx: try the next model
+    }
   }
-  if (!res.ok) {
-    let reason = "";
-    try { const j = await res.json(); reason = JSON.stringify(j.error || ""); } catch {}
-    throw {kind:"gemini", status: res.status, badKey: /API_KEY_INVALID|API key not valid/.test(reason)};
-  }
+  if (!res) throw last;
   const data = await res.json();
   const cand = (data.candidates || [])[0];
   if (!cand || (data.promptFeedback && data.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCK/.test(cand.finishReason || "")) throw {kind:"refused"};
@@ -1080,13 +1087,15 @@ async function claudeJSON(file, prompt, schema, signal){
 function aiErrorCopy(e){
   switch (e && e.kind) {
     case "nokey": return "Add a free Gemini key in Settings to use this.";
-    case "gemini":
-      if (e.badKey || e.status === 401 || e.status === 403) return "Your Gemini API key was rejected. Check it in Settings.";
-      if (e.status === 429) return "You've hit Gemini's free limit for now. Wait a minute and try again; if it keeps happening, the daily allowance resets tomorrow.";
-      if (e.status === 404) return "Google has retired the Gemini model this app uses. The app needs a small update.";
-      if (e.status >= 500) return "Gemini is busy right now. Try again in a moment.";
-      if (e.status === 400) return "Gemini couldn't process that photo. Try a different one.";
+    case "gemini": {
+      const why = e.detail ? ` (Google said: ${e.detail})` : "";
+      if (e.badKey || e.status === 401 || e.status === 403) return "Your Gemini API key was rejected. Check it in Settings." + why;
+      if (e.status === 429) return "You've hit Gemini's free limit for now. Wait a minute and try again; if it keeps happening, the daily allowance resets tomorrow." + why;
+      if (e.status === 404) return "None of the Gemini models this app knows are available to your key." + why;
+      if (e.status >= 500) return "Gemini's servers are overloaded right now, on every model the app tried. Try again in a few minutes." + why;
+      if (e.status === 400) return "Gemini couldn't process that request." + why;
       return "Couldn't reach Gemini. Check your connection and try again.";
+    }
     case "offline": return "You're offline. AI estimates need an internet connection.";
     case "refused": return "The AI declined to analyze that image. Try a different photo.";
     case "truncated": case "badjson": return "Couldn't get a usable estimate from that photo. Try again or use a clearer shot.";
