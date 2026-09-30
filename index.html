@@ -590,13 +590,14 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
     </section>
 
     <section class="card" id="ouraCard">
-      <p class="eyebrow">Oura ring</p>
+      <p class="eyebrow">Oura ring and device sync</p>
       <form class="stack" id="ouraForm">
-        <div class="field"><label for="ghRepo">Private GitHub repo with your Oura data</label><input id="ghRepo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Optimal1100/oura-data"></div>
-        <div class="field"><label for="ghToken">Read-only GitHub token for that repo</label><input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></div>
+        <div class="field"><label for="ghRepo">Your private GitHub repo</label><input id="ghRepo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Optimal1100/oura-data"></div>
+        <div class="field"><label for="ghToken">GitHub token for that repo (Contents: Read and write)</label><input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></div>
         <div class="row-btns"><button class="primary" type="submit" id="ouraConnect">Connect</button><button class="ghost" type="button" id="ouraDisconnect" hidden>Disconnect</button></div>
         <p class="msg" id="ouraMsg"></p>
-        <span class="hint">Your Mac uploads your Oura summary to this repo every 2 hours; the app reads it from there. The token stays on this device and is sent only to GitHub.</span>
+        <p class="msg" id="syncMsg"></p>
+        <span class="hint">This one repo does two jobs. Your Mac uploads your Oura summary to it every 2 hours. And every device where you enter the same repo and a read-and-write token keeps the same food log, targets and details, stored in the repo as ledger.json. API keys are never synced. The token stays on this device and is sent only to GitHub.</span>
       </form>
     </section>
 
@@ -716,20 +717,147 @@ const titleCase = s => s.toLowerCase().replace(/(^|[\s,(\/-])([a-z])/g, (m,a,b) 
 // ---------- storage (this device) ----------
 const state = { settings:{...DEFAULTS}, days:{}, barcodes:{}, coach:{focus:"overall energy and health", about:""}, reviews:{},
   profile:{units:"metric", sex:"", age:"", weightKg:"", heightCm:"", activity:"moderate", notes:""}, microRefs:null, plan:null,
-  oura:{fetched:0, generated:"", days:{}}, dayTargets:{}, date:keyOf(new Date()) };
+  oura:{fetched:0, generated:"", days:{}}, dayTargets:{}, deleted:{}, stamps:{}, date:keyOf(new Date()) };
 let keys = {gemini:"", anthropic:"", usda:"", ghRepo:"", ghToken:""};
 const hasAI = () => !!(keys.gemini || keys.anthropic);
 try {
   const raw = localStorage.getItem(LS_KEY);
   if (raw) { const o = JSON.parse(raw); state.settings = {...DEFAULTS, ...(o.settings||{})}; state.days = o.days || {}; state.barcodes = o.barcodes || {}; state.coach = {...state.coach, ...(o.coach||{})}; state.reviews = o.reviews || {};
     state.profile = {...state.profile, ...(o.profile||{})}; state.microRefs = o.microRefs || null; state.plan = o.plan || null;
-    if (o.oura && o.oura.days) state.oura = o.oura; state.dayTargets = o.dayTargets || {}; }
+    if (o.oura && o.oura.days) state.oura = o.oura; state.dayTargets = o.dayTargets || {}; state.deleted = o.deleted || {}; state.stamps = o.stamps || {}; }
   const k = localStorage.getItem(KEYS_KEY); if (k) keys = {...keys, ...JSON.parse(k)};
 } catch {}
-function persist(){
-  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews, profile:state.profile, microRefs:state.microRefs, plan:state.plan, oura:state.oura, dayTargets:state.dayTargets})); }
+function saveLocal(){
+  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews, profile:state.profile, microRefs:state.microRefs, plan:state.plan, oura:state.oura, dayTargets:state.dayTargets, deleted:state.deleted, stamps:state.stamps})); }
   catch { toast("Couldn't save. Your device storage may be full."); }
 }
+function persist(){ trackChanges(); saveLocal(); scheduleSync(); }
+
+// ---------- device sync: every device merges its log with ledger.json in the private repo ----------
+const SYNC_FILE = "ledger.json";
+const SECTIONS = ["settings","profile","coach","microRefs","plan","dayTargets"]; // each synced whole; the most recently changed copy wins
+let syncBase = null, syncBusy = false, syncAgain = false, syncBlocked = false, syncErr = "", syncTimer = null, lastSync = 0, remoteLedger = {sha:null, etag:"", data:null};
+const entryJSON = e => JSON.stringify({...e, u:undefined});
+// Work out what changed since the last save: stamp changed sections, stamp edited entries, and record deletions.
+function trackChanges(){
+  const now = Date.now(), sec = {}, entries = new Map();
+  SECTIONS.forEach(k => { sec[k] = JSON.stringify(state[k] ?? null); if (syncBase && syncBase.sec[k] !== sec[k]) state.stamps[k] = now; });
+  Object.values(state.days).forEach(list => list.forEach(e => {
+    const j = entryJSON(e); entries.set(e.id, j);
+    if (!syncBase) return;
+    const old = syncBase.entries.get(e.id);
+    if (old === undefined ? state.deleted[e.id] : old !== j) e.u = now;   // restored after a delete, or edited
+  }));
+  if (syncBase) syncBase.entries.forEach((_, id) => { if (!entries.has(id)) state.deleted[id] = now; });
+  syncBase = {sec, entries};
+}
+function setSyncBase(){ syncBase = null; trackChanges(); }
+// Data from before syncing existed has no change times. Give anything that isn't a factory default a minimal one,
+// so a brand-new device's defaults never overwrite it.
+{
+  const fresh = {settings:{...DEFAULTS}, profile:{units:"metric", sex:"", age:"", weightKg:"", heightCm:"", activity:"moderate", notes:""}, coach:{focus:"overall energy and health", about:""}, microRefs:null, plan:null, dayTargets:{}};
+  SECTIONS.forEach(k => { if (!state.stamps[k] && JSON.stringify(state[k] ?? null) !== JSON.stringify(fresh[k])) state.stamps[k] = 1; });
+}
+setSyncBase();
+const ledgerSnapshot = () => ({v:1, days:state.days, deleted:state.deleted, stamps:state.stamps, barcodes:state.barcodes, reviews:state.reviews,
+  ...Object.fromEntries(SECTIONS.map(k => [k, state[k] ?? null]))});
+const stable = v => JSON.stringify(v, (_, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map(k => [k, x[k]])) : x);
+function mergeLedger(a, b){
+  const cutoff = Date.now() - 120 * 864e5, deleted = {};
+  [a.deleted || {}, b.deleted || {}].forEach(d => Object.entries(d).forEach(([id, t]) => { if (t > cutoff && t > (deleted[id] || 0)) deleted[id] = t; }));
+  const byId = new Map();
+  [a.days || {}, b.days || {}].forEach(days => Object.entries(days).forEach(([day, list]) => (list || []).forEach(e => {
+    if (!e || !e.id) return;
+    const cur = byId.get(e.id);
+    if (!cur || (e.u || e.t || 0) > (cur.e.u || cur.e.t || 0)) byId.set(e.id, {day, e});
+  })));
+  const days = {};
+  byId.forEach(({day, e}) => { if ((deleted[e.id] || 0) >= (e.u || e.t || 0)) return; (days[day] ||= []).push(e); });
+  Object.values(days).forEach(list => list.sort((x, y) => (x.t || 0) - (y.t || 0)));
+  const out = {v:1, days, deleted, stamps:{}, barcodes:{...(b.barcodes || {}), ...(a.barcodes || {})}, reviews:{}};
+  SECTIONS.forEach(k => {
+    const sa = (a.stamps || {})[k] || 0, sb = (b.stamps || {})[k] || 0, useB = sb >= sa;   // a = this device, b = the repo; ties go to the repo so devices agree
+    out[k] = (useB ? b[k] : a[k]) ?? null; if (Math.max(sa, sb)) out.stamps[k] = Math.max(sa, sb);
+  });
+  new Set([...Object.keys(a.reviews || {}), ...Object.keys(b.reviews || {})]).forEach(d => {
+    const ra = (a.reviews || {})[d], rb = (b.reviews || {})[d];
+    out.reviews[d] = !ra ? rb : !rb ? ra : (rb.at || 0) > (ra.at || 0) ? rb : ra;
+  });
+  return out;
+}
+function applyLedger(m){
+  state.days = m.days; state.deleted = m.deleted; state.stamps = m.stamps; state.barcodes = m.barcodes; state.reviews = m.reviews;
+  state.settings = {...DEFAULTS, ...(m.settings || {})}; state.profile = {...state.profile, ...(m.profile || {})}; state.coach = {...state.coach, ...(m.coach || {})};
+  state.microRefs = m.microRefs || null; state.plan = m.plan || null; state.dayTargets = m.dayTargets || {};
+  setSyncBase(); saveLocal();
+  fillTargets(); fillProfile(); render(); renderPlan();
+}
+const b64encode = str => { const bytes = new TextEncoder().encode(str); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
+const b64decode = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, "")), c => c.charCodeAt(0)));
+const ghHeaders = extra => ({"Authorization": `Bearer ${keys.ghToken}`, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", ...extra});
+function scheduleSync(delay = 3000){
+  if (!keys.ghRepo || !keys.ghToken) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(() => syncLedger(), delay);
+}
+async function syncLedger(manual){
+  if (!keys.ghRepo || !keys.ghToken) return;
+  if (syncBlocked && !manual) return;   // a read-only token can't sync; wait for a new one
+  if (syncBusy) { syncAgain = true; return; }
+  syncBusy = true; renderSync();
+  const url = `https://api.github.com/repos/${keys.ghRepo}/contents/${SYNC_FILE}`;
+  try {
+    let done = false;
+    for (let attempt = 0; attempt < 4 && !done; attempt++) {
+      const res = await fetch(url, {cache: "no-store", headers: ghHeaders(remoteLedger.etag && remoteLedger.data ? {"If-None-Match": remoteLedger.etag} : {})});
+      if (res.status === 401) throw "GitHub rejected the token.";
+      if (res.status === 404) remoteLedger = {sha:null, etag:"", data:null};
+      else if (res.ok) {
+        const meta = await res.json();
+        let text = meta.content ? b64decode(meta.content) : null;
+        if (text == null) {   // files over 1 MB come back without content; fetch the raw file
+          const raw = await fetch(url, {cache: "no-store", headers: ghHeaders({"Accept": "application/vnd.github.raw+json"})});
+          if (!raw.ok) throw "Couldn't download the synced log from GitHub.";
+          text = await raw.text();
+        }
+        remoteLedger = {sha: meta.sha, etag: res.headers.get("etag") || "", data: JSON.parse(text)};
+      } else if (res.status !== 304) throw res.status === 403 ? "That token can't read this repo." : "GitHub had a problem. Will retry.";
+
+      const merged = remoteLedger.data ? mergeLedger(ledgerSnapshot(), remoteLedger.data) : ledgerSnapshot();
+      const mergedJ = stable(merged);
+      if (!remoteLedger.data || mergedJ !== stable(remoteLedger.data)) {
+        const put = await fetch(url, {method: "PUT", headers: ghHeaders({"Content-Type": "application/json"}),
+          body: JSON.stringify({message: `Ledger sync from ${/iPhone|iPad/.test(navigator.userAgent) ? "iPhone" : /Mac/.test(navigator.userAgent) ? "Mac" : "browser"}`,
+            content: b64encode(JSON.stringify(merged)), ...(remoteLedger.sha ? {sha: remoteLedger.sha} : {})})});
+        if (put.status === 409 || put.status === 422) { remoteLedger.etag = ""; continue; }   // the other device saved first: fetch, merge and try again
+        if (put.status === 403 || put.status === 404) { syncBlocked = true; throw "readonly"; }
+        if (!put.ok) throw "GitHub had a problem saving. Will retry.";
+        const pj = await put.json();
+        remoteLedger = {sha: pj.content && pj.content.sha, etag: "", data: merged};
+      }
+      // Anything changed here while we were talking to GitHub is merged in again before applying.
+      const now = mergeLedger(ledgerSnapshot(), merged);
+      if (stable(now) !== stable(ledgerSnapshot())) applyLedger(now);
+      if (stable(now) !== mergedJ) syncAgain = true;
+      done = true;
+    }
+    if (!done) throw "Both devices kept saving at once. Will retry.";
+    lastSync = Date.now(); syncErr = ""; syncBlocked = false;
+    if (manual) toast("Devices synced");
+  } catch (e) {
+    syncErr = e === "readonly" ? "This token is read-only, so your food log can't sync between devices. Create a token with Contents: Read and write for this repo and paste it here."
+      : typeof e === "string" ? e : "Couldn't reach GitHub to sync. Your changes are saved on this device and will sync when you're back online.";
+  } finally {
+    syncBusy = false; renderSync();
+    if (syncAgain) { syncAgain = false; scheduleSync(1500); }
+  }
+}
+function renderSync(){
+  const el = $("syncMsg"); if (!el) return;
+  const on = !!(keys.ghRepo && keys.ghToken);
+  el.className = "msg " + (syncErr ? "err" : lastSync ? "ok" : "");
+  el.textContent = !on ? "" : syncErr ? syncErr : syncBusy && !lastSync ? "Syncing your food log…" : lastSync ? `Food log synced across your devices ${ago(lastSync)}.` : "";
+}
+setInterval(() => { if (document.visibilityState === "visible") syncLedger(); renderSync(); }, 120000);
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
 // ---------- derived ----------
@@ -783,7 +911,7 @@ function ago(ts){
 function renderOuraSettings(){
   if (document.activeElement !== $("ghRepo")) $("ghRepo").value = keys.ghRepo;
   if (document.activeElement !== $("ghToken")) $("ghToken").value = keys.ghToken;
-  $("ouraConnect").textContent = ouraBusy ? "Syncing…" : ouraOn() ? "Sync now" : "Connect";
+  $("ouraConnect").textContent = ouraBusy || syncBusy ? "Syncing…" : ouraOn() ? "Sync now" : "Connect";
   $("ouraConnect").disabled = ouraBusy;
   $("ouraDisconnect").hidden = !ouraOn();
   const n = Object.keys(state.oura.days).length, gen = Date.parse(state.oura.generated);
@@ -1196,7 +1324,7 @@ function fillTargets(){
 function renderDataInfo(){
   const days = Object.keys(state.days).filter(k => entriesFor(k).length);
   const n = days.reduce((a,k) => a + entriesFor(k).length, 0);
-  $("dataInfo").textContent = `Everything is stored on this device only: ${n} ${n===1?"entry":"entries"} across ${days.length} ${days.length===1?"day":"days"}, and ${Object.keys(state.barcodes).length} saved barcodes. Export a backup now and then so you don't lose it.`;
+  $("dataInfo").textContent = `${keys.ghRepo && keys.ghToken && !syncErr ? "Stored on this device and synced through your private repo" : "Everything is stored on this device only"}: ${n} ${n===1?"entry":"entries"} across ${days.length} ${days.length===1?"day":"days"}, and ${Object.keys(state.barcodes).length} saved barcodes. Export a backup now and then so you don't lose it.`;
 }
 
 // ---------- add form: foods may be "per serving" or "per 100 g" with named portions ----------
@@ -1455,6 +1583,7 @@ let lastToday = keyOf(new Date());
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   if (ouraOn() && Date.now() - state.oura.fetched > 20 * 60000) syncOura();
+  syncLedger();
   const now = keyOf(new Date());
   if (now !== lastToday) { if (state.date === lastToday) state.date = now; lastToday = now; $("fMeal").value = defaultMeal(); render(); }
 });
@@ -1952,11 +2081,11 @@ $("ouraForm").addEventListener("submit", e => {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { ouraErr = "Enter the repo as owner/name and paste the token."; renderOuraSettings(); return; }
   keys = {...keys, ghRepo: repo, ghToken: token};
   try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch {}
-  document.activeElement.blur(); syncOura(true);
+  document.activeElement.blur(); remoteLedger = {sha:null, etag:"", data:null}; syncOura(true); syncLedger(true);
 });
 $("ouraDisconnect").addEventListener("click", () => {
   keys = {...keys, ghRepo:"", ghToken:""}; try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch {}
-  state.oura = {fetched:0, generated:"", days:{}}; ouraErr = ""; persist(); render(); renderOuraSettings(); toast("Oura disconnected");
+  state.oura = {fetched:0, generated:"", days:{}}; ouraErr = ""; syncErr = ""; lastSync = 0; persist(); render(); renderOuraSettings(); renderSync(); toast("Disconnected. Your log stays on this device.");
 });
 
 // ---------- profile ----------
@@ -2113,7 +2242,7 @@ $("toastUndo").addEventListener("click", () => { if (undoFn) undoFn(); undoFn = 
 // ---------- start ----------
 $("fMeal").value = defaultMeal();
 setUnitUI(null); fillTargets(); fillProfile(); renderKeys(); renderOuraSettings(); render(); renderPlan();
-if (ouraOn()) syncOura(); show(location.hash.slice(1) || "today");
+if (ouraOn()) syncOura(); syncLedger(); renderSync(); show(location.hash.slice(1) || "today");
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
