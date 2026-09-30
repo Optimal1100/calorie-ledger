@@ -301,7 +301,7 @@ textarea.note{width:100%;border:1px solid var(--line);background:var(--card);bor
 
         <div class="panel" id="panelPhoto" hidden>
           <h3>Estimate a meal from a photo</h3>
-          <div id="photoNoKey" hidden><p class="msg">Meal photos use your Anthropic API key. <button type="button" class="ghost" id="gotoKey" style="margin-left:6px">Add your key</button></p></div>
+          <div id="photoNoKey" hidden><p class="msg">Meal photos need a free Google Gemini key. <button type="button" class="ghost" id="gotoKey" style="margin-left:6px">Add your key</button></p></div>
           <input type="file" id="mealFile" class="vh" accept="image/*">
           <label class="drop" for="mealFile" id="mealDrop">
             <span class="ph" id="mealThumb"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
@@ -377,16 +377,20 @@ textarea.note{width:100%;border:1px solid var(--line);background:var(--card);bor
         <p class="eyebrow">AI and food databases</p>
         <form class="stack" id="keyForm">
           <div class="field">
-            <label for="kAnthropic">Anthropic API key (for meal photos and label reading)</label>
-            <input id="kAnthropic" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+            <label for="kGemini">Google Gemini API key (free, for meal photos and label reading)</label>
+            <input id="kGemini" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…">
             <span class="keystate" id="kState"></span>
+          </div>
+          <div class="field">
+            <label for="kAnthropic">Anthropic API key (optional, paid; used instead of Gemini if set)</label>
+            <input id="kAnthropic" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
           </div>
           <div class="field">
             <label for="kUsda">USDA FoodData Central key (optional)</label>
             <input id="kUsda" type="password" autocomplete="off" spellcheck="false" placeholder="Leave blank to use the shared demo key">
           </div>
           <div class="row-btns"><button class="primary" type="submit">Save keys</button><button class="ghost" type="button" id="clearKeys">Remove keys</button></div>
-          <span class="hint">Keys stay on this device and are sent only to Anthropic and USDA. Get an Anthropic key at console.anthropic.com. The demo USDA key allows about 30 searches an hour; a free personal key from api.data.gov raises that.</span>
+          <span class="hint">Keys stay on this device and are sent only to the service they belong to. Get a free Gemini key at aistudio.google.com/apikey (no card needed). On the free tier, Google may use your photos to improve its products. The demo USDA key allows about 30 searches an hour; a free personal key from api.data.gov raises that.</span>
         </form>
       </section>
 
@@ -461,7 +465,8 @@ const titleCase = s => s.toLowerCase().replace(/(^|[\s,(\/-])([a-z])/g, (m,a,b) 
 
 // ---------- storage (this device) ----------
 const state = { settings:{...DEFAULTS}, days:{}, barcodes:{}, date:keyOf(new Date()) };
-let keys = {anthropic:"", usda:""};
+let keys = {gemini:"", anthropic:"", usda:""};
+const hasAI = () => !!(keys.gemini || keys.anthropic);
 try {
   const raw = localStorage.getItem(LS_KEY);
   if (raw) { const o = JSON.parse(raw); state.settings = {...DEFAULTS, ...(o.settings||{})}; state.days = o.days || {}; state.barcodes = o.barcodes || {}; }
@@ -973,13 +978,13 @@ async function lookupCode(raw, photo){
     focusAmount(); return;
   }
   pendingBarcode = key; updateAddBtn();
-  const hasAI = !!keys.anthropic;
+  const canAI = hasAI();
   $("bcOut").innerHTML = `<p class="msg">${failed ? "Couldn't reach Open Food Facts right now." : product ? `Open Food Facts knows this product but has no nutrition data for it.` : `Barcode <b class="num">${esc(code)}</b> isn't in Open Food Facts or USDA yet.`} Add its nutrition once and it will be remembered next time you scan it.</p>
-    ${hasAI ? `<input type="file" id="lblFile" class="vh" accept="image/*">
+    ${canAI ? `<input type="file" id="lblFile" class="vh" accept="image/*">
     <label class="drop" for="lblFile" id="lblDrop"><span class="ph"><svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM9 7h6M9 11h6M9 15h4"/></svg></span><span><b>Photograph the Nutrition Facts panel</b><span>AI reads the label and fills in the form.</span></span></label>
     ${photo ? `<button type="button" class="ghost" id="lblUseSame">Read the photo I already took</button>` : ""}` : ""}
-    <p class="msg">${hasAI ? "Or type" : "Type"} the values from the package into the form below.</p>`;
-  if (hasAI) {
+    <p class="msg">${canAI ? "Or type" : "Type"} the values from the package into the form below.</p>`;
+  if (canAI) {
     wireFile("lblDrop", "lblFile", readLabel);
     if (photo) $("lblUseSame").addEventListener("click", () => readLabel(photo));
   }
@@ -994,16 +999,57 @@ wireFile("bcDrop", "bcFile", async file => {
   }
   if (code) return lookupCode(code, file);
   $("bcOut").innerHTML = `<p class="msg err">Couldn't find a barcode in that photo. Move closer, keep the code flat and in focus, or type the number above.</p>
-    ${keys.anthropic ? `<button type="button" class="ghost" id="bcAI">Identify the product from the photo with AI</button>` : ""}`;
-  if (keys.anthropic) $("bcAI").addEventListener("click", () => readLabel(file));
+    ${hasAI() ? `<button type="button" class="ghost" id="bcAI">Identify the product from the photo with AI</button>` : ""}`;
+  if (hasAI()) $("bcAI").addEventListener("click", () => readLabel(file));
 });
 $("bcLookup").addEventListener("click", () => lookupCode($("bcCode").value));
 $("bcCode").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupCode($("bcCode").value); } });
 
-// --- Claude (Anthropic API, called from this device with the user's own key) ---
+// --- AI vision: Google Gemini (free tier) by default, or Claude when an Anthropic key is set ---
+const GEMINI_MODEL = "gemini-3.8-flash";
+async function aiJSON(file, prompt, schema, signal){
+  if (keys.anthropic) return claudeJSON(file, prompt, schema, signal);
+  if (keys.gemini) return geminiJSON(file, prompt, schema, signal);
+  throw {kind:"nokey"};
+}
+// Gemini's responseSchema is an OpenAPI subset: no additionalProperties.
+function geminiSchema(x){
+  if (Array.isArray(x)) return x.map(geminiSchema);
+  if (!x || typeof x !== "object") return x;
+  const out = {};
+  for (const [k,v] of Object.entries(x)) if (k !== "additionalProperties") out[k] = geminiSchema(v);
+  return out;
+}
+async function geminiJSON(file, prompt, schema, signal){
+  const image = await toJpegBase64(file, 1568);
+  let res;
+  try {
+    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+      method: "POST", signal,
+      headers: {"content-type": "application/json", "x-goog-api-key": keys.gemini},
+      body: JSON.stringify({
+        contents: [{role: "user", parts: [{inline_data: {mime_type: "image/jpeg", data: image}}, {text: prompt}]}],
+        generationConfig: {responseMimeType: "application/json", responseSchema: geminiSchema(schema)}
+      })
+    });
+  } catch (e) {
+    if (signal && signal.aborted) throw {kind:"cancelled"};
+    throw {kind: navigator.onLine === false ? "offline" : "gemini", status: 0};
+  }
+  if (!res.ok) {
+    let reason = "";
+    try { const j = await res.json(); reason = JSON.stringify(j.error || ""); } catch {}
+    throw {kind:"gemini", status: res.status, badKey: /API_KEY_INVALID|API key not valid/.test(reason)};
+  }
+  const data = await res.json();
+  const cand = (data.candidates || [])[0];
+  if (!cand || (data.promptFeedback && data.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCK/.test(cand.finishReason || "")) throw {kind:"refused"};
+  if (cand.finishReason === "MAX_TOKENS") throw {kind:"truncated"};
+  const text = ((cand.content && cand.content.parts) || []).map(p => p.text || "").join("");
+  try { return JSON.parse(text); } catch { throw {kind:"badjson"}; }
+}
 let AnthropicSDK = null;
 async function claudeJSON(file, prompt, schema, signal){
-  if (!keys.anthropic) throw {kind:"nokey"};
   const image = await toJpegBase64(file, 1568);
   if (!AnthropicSDK) {
     try { AnthropicSDK = (await import(SDK_URL)).default; } catch { throw {kind:"offline"}; }
@@ -1033,9 +1079,16 @@ async function claudeJSON(file, prompt, schema, signal){
 }
 function aiErrorCopy(e){
   switch (e && e.kind) {
-    case "nokey": return "Add your Anthropic API key in Settings to use this.";
+    case "nokey": return "Add a free Gemini key in Settings to use this.";
+    case "gemini":
+      if (e.badKey || e.status === 401 || e.status === 403) return "Your Gemini API key was rejected. Check it in Settings.";
+      if (e.status === 429) return "You've hit Gemini's free limit for now. Wait a minute and try again; if it keeps happening, the daily allowance resets tomorrow.";
+      if (e.status === 404) return "Google has retired the Gemini model this app uses. The app needs a small update.";
+      if (e.status >= 500) return "Gemini is busy right now. Try again in a moment.";
+      if (e.status === 400) return "Gemini couldn't process that photo. Try a different one.";
+      return "Couldn't reach Gemini. Check your connection and try again.";
     case "offline": return "You're offline. AI estimates need an internet connection.";
-    case "refused": return "Claude declined to analyze that image. Try a different photo.";
+    case "refused": return "The AI declined to analyze that image. Try a different photo.";
     case "truncated": case "badjson": return "Couldn't get a usable estimate from that photo. Try again or use a clearer shot.";
     case "api":
       if (e.status === 401) return "Your Anthropic API key was rejected. Check it in Settings.";
@@ -1071,7 +1124,7 @@ async function readLabel(file){
   const box = $("bcOut");
   box.insertAdjacentHTML("beforeend", `<div id="lblWork" style="margin-top:10px">${working("Reading the package… this can take up to a minute.")}</div>`);
   try {
-    const r = await claudeJSON(file,
+    const r = await aiJSON(file,
       "This photo shows a packaged food product: its Nutrition Facts panel, the front of the pack, or its barcode. " +
       "Identify the product and give calories, protein, carbohydrate and fat for ONE serving as printed on the label, plus the serving size text and its weight in grams (0 if not printed). " +
       "If no nutrition panel is readable but you recognise the product, give typical values and set source to \"estimate\". " +
@@ -1093,8 +1146,8 @@ async function readLabel(file){
 let mealFile = null, mealCtl = null, mealItems = [];
 function setMealMsg(t, cls){ $("mealOut").innerHTML = `<p class="msg ${cls||""}">${esc(t)}</p>`; }
 function refreshPhotoUI(){
-  $("photoNoKey").hidden = !!keys.anthropic;
-  $("mealGo").disabled = !mealFile || !keys.anthropic || !!mealCtl;
+  $("photoNoKey").hidden = hasAI();
+  $("mealGo").disabled = !mealFile || !hasAI() || !!mealCtl;
 }
 wireFile("mealDrop", "mealFile", file => {
   mealFile = file;
@@ -1102,15 +1155,15 @@ wireFile("mealDrop", "mealFile", file => {
   $("mealDropTitle").textContent = "Photo ready. Tap to choose a different one";
   $("mealOut").innerHTML = ""; refreshPhotoUI();
 });
-$("gotoKey").addEventListener("click", () => { $("keysCard").scrollIntoView({behavior:"smooth", block:"center"}); $("kAnthropic").focus({preventScroll:true}); });
+$("gotoKey").addEventListener("click", () => { $("keysCard").scrollIntoView({behavior:"smooth", block:"center"}); $("kGemini").focus({preventScroll:true}); });
 $("mealStop").addEventListener("click", () => mealCtl && mealCtl.abort());
 $("mealGo").addEventListener("click", async () => {
-  if (!mealFile || !keys.anthropic) return;
+  if (!mealFile || !hasAI()) return;
   mealCtl = new AbortController(); refreshPhotoUI(); $("mealStop").hidden = false;
   $("mealOut").innerHTML = working("Looking at your meal… this can take up to a minute.");
   const note = $("mealNote").value.trim().slice(0, 500);
   try {
-    const r = await claudeJSON(mealFile,
+    const r = await aiJSON(mealFile,
       "You are a careful nutrition estimator. The photo shows a meal or snack. Identify each distinct food or drink, estimate its portion (grams or common units), " +
       "and estimate calories plus protein, carbohydrate and fat in grams for that portion. Account for likely cooking oil, butter, sauces and dressings. " +
       (note ? `The person eating it adds: "${note}". ` : "") +
@@ -1191,18 +1244,18 @@ $("suggestMacros").addEventListener("click", () => {
   $("tP").value = Math.round(goal*.30/4); $("tC").value = Math.round(goal*.45/4); $("tF").value = Math.round(goal*.25/9);
 });
 function renderKeys(){
-  $("kAnthropic").value = keys.anthropic; $("kUsda").value = keys.usda;
-  $("kState").textContent = keys.anthropic ? "Key saved. Meal photos and label reading are on." : "No key yet. Meal photos are off.";
-  $("kState").className = "keystate " + (keys.anthropic ? "on" : "off");
+  $("kGemini").value = keys.gemini; $("kAnthropic").value = keys.anthropic; $("kUsda").value = keys.usda;
+  $("kState").textContent = keys.anthropic ? "Meal photos are on, using Claude (paid)." : keys.gemini ? "Key saved. Meal photos and label reading are on, using Gemini (free)." : "No key yet. Meal photos are off.";
+  $("kState").className = "keystate " + (hasAI() ? "on" : "off");
   refreshPhotoUI();
 }
 function saveKeys(){ try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch {} renderKeys(); }
 $("keyForm").addEventListener("submit", e => {
   e.preventDefault();
-  keys = {anthropic:$("kAnthropic").value.trim(), usda:$("kUsda").value.trim()};
+  keys = {gemini:$("kGemini").value.trim(), anthropic:$("kAnthropic").value.trim(), usda:$("kUsda").value.trim()};
   saveKeys(); document.activeElement.blur(); toast("Keys saved on this device");
 });
-$("clearKeys").addEventListener("click", () => { keys = {anthropic:"", usda:""}; saveKeys(); toast("Keys removed from this device"); });
+$("clearKeys").addEventListener("click", () => { keys = {gemini:"", anthropic:"", usda:""}; saveKeys(); toast("Keys removed from this device"); });
 
 $("exportBtn").addEventListener("click", async () => {
   const blob = new Blob([JSON.stringify({app:"calorie-ledger", version:1, exported:new Date().toISOString(), settings:state.settings, days:state.days, barcodes:state.barcodes}, null, 1)], {type:"application/json"});

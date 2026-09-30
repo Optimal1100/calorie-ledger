@@ -4,7 +4,7 @@ A calorie and macro tracker that installs on an iPhone home screen. Plain HTML, 
 
 - **Food search**: a built-in list of common foods, plus online search of USDA FoodData Central (generic and branded foods).
 - **Barcode scanner**: live camera scanning (ZXing), looked up in Open Food Facts first, then USDA's branded foods.
-- **Meal photos**: Claude estimates each item's calories and macros. This needs your own Anthropic API key, entered in the app's settings.
+- **Meal photos**: AI estimates each item's calories and macros. Uses a free Google Gemini API key (aistudio.google.com/apikey) entered in the app's settings, or an Anthropic key if you set one.
 - **Storage**: everything stays on the device (localStorage). Use Export backup to keep a copy.
 
 ## Run locally
