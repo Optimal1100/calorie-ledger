@@ -157,6 +157,32 @@ button.day{border:0;background:none}
 .adjust.flat{background:var(--field)}
 .adjust.flat .t{color:var(--muted)}
 
+/* Fast logging: action row on Today and the + sheet */
+.qgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.qbtn{border:0;background:var(--card);border-radius:18px;padding:12px 4px 10px;display:grid;justify-items:center;gap:6px;font-size:13px;font-weight:700;box-shadow:var(--shadow);color:var(--ink)}
+.qbtn:active{transform:scale(.96)}
+.qbtn .ico{width:44px;height:44px;border-radius:14px;background:var(--accent);display:grid;place-items:center}
+.qbtn svg{width:24px;height:24px;stroke:var(--accent-ink);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.sheet .qbtn{background:var(--field);box-shadow:none}
+.sheet-back{position:fixed;inset:0;background:rgba(0,0,0,.38);z-index:45;opacity:0;pointer-events:none;transition:opacity .2s}
+.sheet-back.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:46;margin:0 auto;max-width:600px;background:var(--card);border-radius:26px 26px 0 0;
+  padding:10px 16px calc(env(safe-area-inset-bottom,0px) + 18px);display:grid;gap:14px;transform:translateY(110%);transition:transform .26s cubic-bezier(.2,.8,.2,1);box-shadow:0 -12px 34px rgba(0,0,0,.22)}
+.sheet.on{transform:none}
+.sheet .grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:0 auto}
+.sheet-head{display:flex;justify-content:space-between;align-items:center}
+.sheet-head h2{margin:0;font:800 19px/1.2 var(--display)}
+.sheet .chips{margin:0 -16px;padding:2px 16px 4px}
+.sheet .more{border:0;background:none;color:var(--accent);font-weight:700;font-size:14px;padding:6px 0;justify-self:center}
+.segm{display:grid;grid-template-columns:repeat(4,1fr);background:var(--field);border-radius:12px;padding:3px;gap:2px}
+.segm button{border:0;background:none;border-radius:9px;padding:8px 0;font-size:13px;font-weight:700;color:var(--muted)}
+.segm button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.srow{display:flex;align-items:stretch;gap:4px}
+.srow > button[data-sug]{flex:1;min-width:0}
+.suggest .qadd{flex:none;width:40px;justify-content:center;align-items:center;font-size:22px;line-height:1;color:var(--accent);font-weight:700;padding:0}
+.copy-meal{margin-top:10px;width:100%;border:1.5px dashed var(--line);background:none;border-radius:12px;padding:10px;font-size:13px;font-weight:700;color:var(--accent)}
+.copy-meal:hover{border-color:var(--accent);background:var(--accent-soft)}
+
 /* Quick add */
 .chips{display:flex;gap:8px;overflow-x:auto;margin:0 -18px;padding:2px 18px 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .chips::-webkit-scrollbar{display:none}
@@ -416,6 +442,8 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
       <div class="macros" id="macros"></div>
     </section>
 
+    <div class="qgrid" id="quickRow"><button type="button" class="qbtn" data-quick="scan"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 7V4h3M18 4h3v3M21 17v3h-3M6 20H3v-3M7 8v8M10 8v8M13 8v8M16 8v8"/></svg></span>Scan</button><button type="button" class="qbtn" data-quick="photo"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>Photo</button><button type="button" class="qbtn" data-quick="describe"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5"/></svg></span>Describe</button><button type="button" class="qbtn" data-quick="search"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span>Search</button></div>
+
     <section class="card" id="bodyCard" hidden></section>
 
     <section class="card">
@@ -474,7 +502,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
     <section class="card panel" id="panelText" hidden>
       <h3>Describe what you ate</h3>
       <div id="textNoKey" hidden><p class="msg">This needs a free Google Gemini key. <button type="button" class="ghost" id="textGotoKey" style="margin-left:6px">Add your key</button></p></div>
-      <div class="field"><label for="descText">In English or Swedish. Amounts help, but aren't required.</label><textarea id="descText" class="note" rows="3" placeholder="e.g. två stekta ägg, en skiva rågbröd med smör och ost, ett glas mjölk"></textarea></div>
+      <div class="field"><label for="descText">In English or Swedish. Amounts help, but aren't required.</label><textarea id="descText" class="note" rows="3" enterkeyhint="go" placeholder="e.g. två stekta ägg, en skiva rågbröd med smör och ost, ett glas mjölk"></textarea></div>
       <div class="inline"><button type="button" class="primary" id="descGo" disabled>Estimate calories</button><button type="button" class="ghost" id="descStop" hidden>Stop</button></div>
       <div id="descOut"></div>
     </section>
@@ -660,6 +688,16 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
   <button type="button" data-tab="activity"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.500-6 4 12 2.500-6H21"/></svg>Activity</button>
   <button type="button" data-tab="review"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.100 1.900L12 17l-1.900-5.100L5 10l5.100-1.900zM18.500 15.500l.8 2.200 2.200.8-2.200.8-.8 2.200-.8-2.200-2.200-.8 2.200-.8z"/></svg>Review</button>
 </nav>
+
+<div class="sheet-back" id="sheetBack"></div>
+<div class="sheet" id="logSheet" role="dialog" aria-modal="true" aria-label="Log food" aria-hidden="true">
+  <div class="grab"></div>
+  <div class="sheet-head"><h2 id="sheetTitle">Log food</h2><button type="button" class="icon-btn" id="sheetClose" aria-label="Close">×</button></div>
+  <div class="segm" id="sheetMeals"><button type="button" data-m="breakfast">Breakfast</button><button type="button" data-m="lunch">Lunch</button><button type="button" data-m="dinner">Dinner</button><button type="button" data-m="snacks">Snacks</button></div>
+  <div class="qgrid"><button type="button" class="qbtn" data-quick="scan"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 7V4h3M18 4h3v3M21 17v3h-3M6 20H3v-3M7 8v8M10 8v8M13 8v8M16 8v8"/></svg></span>Scan</button><button type="button" class="qbtn" data-quick="photo"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>Photo</button><button type="button" class="qbtn" data-quick="describe"><span class="ico"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5"/></svg></span>Describe</button><button type="button" class="qbtn" data-quick="search"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></span>Search</button></div>
+  <div><p class="chips-label" id="sheetChipsLabel">Tap to add</p><div class="chips" id="sheetChips"></div></div>
+  <button type="button" class="more" id="sheetMore">Type it in yourself</button>
+</div>
 
 <div class="scanner" id="scanner" hidden>
   <video id="scanVideo" playsinline muted autoplay></video>
@@ -1254,7 +1292,11 @@ function show(v, keepScroll){
   if (v === "activity" && ouraOn() && Date.now() - state.oura.fetched > 5 * 60000) syncOura();
   try { history.replaceState(null, "", "#" + v); } catch {}
 }
-document.querySelector(".tabbar").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) show(b.dataset.tab); });
+document.querySelector(".tabbar").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]"); if (!b) return;
+  if (b.dataset.tab === "add") { $("logSheet").classList.contains("on") ? closeSheet() : openSheet(); return; }
+  closeSheet(); show(b.dataset.tab);
+});
 $("settingsBtn").addEventListener("click", () => show(document.body.dataset.view === "settings" ? "today" : "settings"));
 
 // ---------- render ----------
@@ -1303,7 +1345,10 @@ function render(){
   $("meals").innerHTML = MEALS.map(([k,n]) => {
     const list = es.filter(e => e.meal === k), mt = totals(list);
     const items = list.map(e => `<li class="entry"><div class="nm">${esc(e.name)}<div class="mac num"><i style="color:var(--protein)">P</i> ${g(e.p||0)} · <i style="color:var(--carbs)">C</i> ${g(e.c||0)} · <i style="color:var(--fat)">F</i> ${g(e.f||0)} g</div></div><span class="k num">${fmt(e.kcal)}<small>kcal</small></span><button class="del" data-del="${esc(e.id)}" aria-label="Remove ${esc(e.name)}">×</button></li>`).join("");
-    return `<section class="mealcard"><div class="meal-head"><span class="meal-ico"><svg viewBox="0 0 24 24">${MEAL_ICONS[k]}</svg></span><div class="grow"><h3>${n}</h3><div class="sub num">${list.length ? `${fmt(mt.kcal)} kcal · ${list.length} ${list.length===1?"item":"items"}` : "Nothing logged yet"}</div></div><button class="add" data-meal="${k}" aria-label="Add to ${n}">+</button></div>${list.length ? `<ul class="entries">${items}</ul>` : ""}</section>`;
+    return `<section class="mealcard"><div class="meal-head"><span class="meal-ico"><svg viewBox="0 0 24 24">${MEAL_ICONS[k]}</svg></span><div class="grow"><h3>${n}</h3><div class="sub num">${list.length ? `${fmt(mt.kcal)} kcal · ${list.length} ${list.length===1?"item":"items"}` : "Nothing logged yet"}</div></div><button class="add" data-meal="${k}" aria-label="Add to ${n}">+</button></div>${list.length ? `<ul class="entries">${items}</ul>` : (() => {
+      const y = entriesFor(shift(state.date, -1)).filter(e => e.meal === k);
+      return y.length ? `<button type="button" class="copy-meal" data-copy="${k}">Same as yesterday · ${y.length} ${y.length===1?"item":"items"}, ${fmt(totals(y).kcal)} kcal</button>` : "";
+    })()}</section>`;
   }).join("");
 
   renderChips(); renderWeek(); renderMicros(); renderBody(); renderActivity(); updateAddBtn(); renderDataInfo(); renderReview();
@@ -1318,6 +1363,9 @@ function renderChips(){
     return `<button type="button" class="chip" data-chip="${i}"><span>${esc(f.name.replace(/\s*\(.*\)$/,""))}</span><small class="num">${fmt(f.kcal*q.amount*q.factor)} kcal</small></button>`;
   }).join("");
   $("chips")._foods = foods;
+  $("sheetChips").innerHTML = $("chips").innerHTML; $("sheetChips")._foods = foods;
+  $("sheetChipsLabel").textContent = rec.length >= 3 ? `Your usuals · tap to add to ${mealName()}` : `Tap to add to ${mealName()}`;
+  document.querySelectorAll("#sheetMeals [data-m]").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === $("fMeal").value));
 }
 
 function renderWeek(){
@@ -1468,7 +1516,7 @@ $("fMeal").addEventListener("change", () => { updateAddBtn(); renderChips(); if 
 let searchCtl = null;
 function hideSuggest(){ $("suggest").hidden = true; if (searchCtl) searchCtl.abort(); }
 function suggestButtons(list, offset){
-  return list.map((a,i) => `<button type="button" data-sug="${offset+i}"><span>${a.tag?`<span class="tag">${esc(a.tag)}</span>`:""}${esc(a.f.name)}${a.f.en ? `<span class="alt">${esc(a.f.en)}</span>` : ""}</span><small class="num">${fmt(a.f.kcal)} kcal${a.f.unit==="100 g"?" / 100 g":""}</small></button>`).join("");
+  return list.map((a,i) => `<div class="srow"><button type="button" data-sug="${offset+i}"><span>${a.tag?`<span class="tag">${esc(a.tag)}</span>`:""}${esc(a.f.name)}${a.f.en ? `<span class="alt">${esc(a.f.en)}</span>` : ""}</span><small class="num">${fmt(a.f.kcal)} kcal${a.f.unit==="100 g"?" / 100 g":""}</small></button><button type="button" class="qadd" data-qadd="${offset+i}" aria-label="Add ${esc(a.f.name)} now">+</button></div>`).join("");
 }
 // Swedish Food Agency database, bundled with the app (data/livsmedel.json) and searched on the device.
 const fold = t => String(t).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -1619,14 +1667,19 @@ $("fName").addEventListener("keydown", e => {
   if (e.key === "Escape") hideSuggest();
 });
 $("suggest").addEventListener("keydown", e => {
-  const b = document.activeElement, sib = dir => { let x = b[dir]; while (x && x.tagName !== "BUTTON") x = x[dir]; return x; };
-  if (e.key === "ArrowDown") { e.preventDefault(); const n = sib("nextElementSibling"); if (n) n.focus(); }
-  if (e.key === "ArrowUp") { e.preventDefault(); (sib("previousElementSibling") || $("fName")).focus(); }
+  const all = [...$("suggest").querySelectorAll("[data-sug], [data-online]")], i = all.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") { e.preventDefault(); if (all[i + 1]) all[i + 1].focus(); }
+  if (e.key === "ArrowUp") { e.preventDefault(); (i > 0 ? all[i - 1] : $("fName")).focus(); }
   if (e.key === "Escape") { hideSuggest(); $("fName").focus(); }
 });
 $("suggest").addEventListener("mousedown", e => e.preventDefault());
 $("suggest").addEventListener("click", e => {
   if (e.target.closest("[data-online]")) return searchOnline();
+  const qa = e.target.closest("[data-qadd]");
+  if (qa) {
+    const f = $("suggest")._foods[+qa.dataset.qadd]; hideSuggest();
+    addEntry(f, qtyOf(f), $("fMeal").value); clearForm(); return;
+  }
   const b = e.target.closest("[data-sug]");
   if (b) { fillForm($("suggest")._foods[+b.dataset.sug]); $("fServ").focus(); $("fServ").select(); }
 });
@@ -1639,9 +1692,45 @@ $("chips").addEventListener("click", e => {
 });
 $("meals").addEventListener("click", e => {
   const d = e.target.closest("[data-del]"); if (d) return removeEntry(d.dataset.del);
+  const c = e.target.closest("[data-copy]");
+  if (c) {
+    const k = c.dataset.copy, day = state.date, src = entriesFor(shift(day, -1)).filter(x => x.meal === k), now = Date.now();
+    const copies = src.map((x, i) => ({...x, id: uid(), t: now + i, u: undefined}));
+    state.days[day] = [...entriesFor(day), ...copies]; persist(); render();
+    toast(`Added yesterday's ${MEALS.find(m => m[0] === k)[1].toLowerCase()} · ${fmt(totals(copies).kcal)} kcal`, () => {
+      const ids = new Set(copies.map(x => x.id)); state.days[day] = entriesFor(day).filter(x => !ids.has(x.id)); persist(); render();
+    });
+    return;
+  }
   const a = e.target.closest("[data-meal]");
-  if (a) { $("fMeal").value = a.dataset.meal; updateAddBtn(); show("add"); $("fName").focus(); }
+  if (a) { $("fMeal").value = a.dataset.meal; updateAddBtn(); openSheet(); }
 });
+
+// ---------- fast logging ----------
+function openSheet(){
+  renderChips();
+  $("sheetBack").classList.add("on"); $("logSheet").classList.add("on"); $("logSheet").setAttribute("aria-hidden", "false");
+}
+function closeSheet(){ $("sheetBack").classList.remove("on"); $("logSheet").classList.remove("on"); $("logSheet").setAttribute("aria-hidden", "true"); }
+// Everything here runs straight from the tap, so iPhone allows the camera, photo picker and keyboard to open at once.
+function quickAction(kind){
+  closeSheet(); hideSuggest();
+  show("add");
+  if (kind === "scan") { togglePanelOpen("panelBarcode"); startScanner(); }
+  else if (kind === "photo") { togglePanelOpen("panelPhoto"); $("mealFile").click(); }
+  else if (kind === "describe") { togglePanelOpen("panelText"); $("descText").focus(); }
+  else { togglePanel("none"); $("fName").focus(); }
+}
+document.addEventListener("click", e => { const b = e.target.closest("[data-quick]"); if (b) quickAction(b.dataset.quick); });
+$("sheetBack").addEventListener("click", closeSheet);
+$("sheetClose").addEventListener("click", closeSheet);
+$("sheetMore").addEventListener("click", () => { closeSheet(); show("add"); togglePanel("none"); $("fName").focus(); });
+$("sheetMeals").addEventListener("click", e => { const b = e.target.closest("[data-m]"); if (!b) return; $("fMeal").value = b.dataset.m; updateAddBtn(); renderChips(); });
+$("sheetChips").addEventListener("click", e => {
+  const b = e.target.closest("[data-chip]"); if (!b) return;
+  const f = $("sheetChips")._foods[+b.dataset.chip]; closeSheet(); addEntry(f, qtyOf(f), $("fMeal").value);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("logSheet").classList.contains("on")) closeSheet(); });
 $("chart").addEventListener("click", e => { const b = e.target.closest("[data-day]"); if (b) { state.date = b.dataset.day; render(); show("today"); } });
 $("prev").addEventListener("click", () => { state.date = shift(state.date,-1); rvError = ""; render(); });
 $("next").addEventListener("click", () => { if (state.date < keyOf(new Date())) { state.date = shift(state.date,1); render(); } });
@@ -2086,6 +2175,7 @@ const toMealItems = r => (r.items || []).slice(0, 20).map(it => ({on:true, name:
   kcal:Math.max(0, Math.round(+it.kcal || 0)), p:r1(it.protein_g), c:r1(it.carbs_g), f:r1(it.fat_g)}));
 // --- describe a meal in words ---
 $("descText").addEventListener("input", refreshPhotoUI);
+$("descText").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!$("descGo").disabled) $("descGo").click(); } });
 $("textGotoKey").addEventListener("click", () => $("gotoKey").click());
 $("descStop").addEventListener("click", () => mealCtl && mealCtl.abort());
 $("descGo").addEventListener("click", async () => {
@@ -2117,6 +2207,7 @@ wireFile("mealDrop", "mealFile", file => {
   $("mealThumb").outerHTML = `<img id="mealThumb" alt="Your meal photo" src="${URL.createObjectURL(file)}">`;
   $("mealDropTitle").textContent = "Photo ready. Tap to choose a different one";
   $("mealOut").innerHTML = ""; refreshPhotoUI();
+  if (hasAI() && !mealCtl) $("mealGo").click();   // no extra tap: start estimating right away
 });
 $("gotoKey").addEventListener("click", () => { show("settings", true); $("keysCard").scrollIntoView({behavior:"smooth", block:"center"}); $("kGemini").focus({preventScroll:true}); });
 $("mealStop").addEventListener("click", () => mealCtl && mealCtl.abort());
