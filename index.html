@@ -611,7 +611,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
         <div class="row-btns"><button class="primary" type="submit" id="ouraConnect">Connect</button><button class="ghost" type="button" id="ouraDisconnect" hidden>Disconnect</button></div>
         <p class="msg" id="ouraMsg"></p>
         <p class="msg" id="syncMsg"></p>
-        <span class="hint">This one repo does two jobs. Your Mac uploads your Oura summary to it every 2 hours. And every device where you enter the same repo and a read-and-write token keeps the same food log, targets and details, stored in the repo as ledger.json. API keys are never synced. The token stays on this device and is sent only to GitHub.</span>
+        <span class="hint">This one repo does two jobs. A scheduled job in it fetches your Oura data every hour, and opening the app asks it for a fresh fetch. And every device where you enter the same repo and a read-and-write token keeps the same food log, targets and details, stored in the repo as ledger.json. API keys are never synced. The token stays on this device and is sent only to GitHub.</span>
       </form>
     </section>
 
@@ -899,7 +899,22 @@ const targetsFor = k => state.dayTargets[k] || state.settings;
 
 // ---------- Oura ----------
 const ouraOn = () => !!(keys.ghRepo && keys.ghToken);
-let ouraBusy = false, ouraErr = "";
+let ouraBusy = false, ouraErr = "", ouraKicked = 0, ouraKickNote = "";
+// Ask the cloud job in the repo to fetch from Oura right now, then pick up its result over the next few minutes.
+// Needs "Actions: Read and write" on the token; without it the hourly schedule still runs.
+async function kickOura(manual){
+  if (!ouraOn() || Date.now() - ouraKicked < (manual ? 60e3 : 15 * 60e3)) return;
+  ouraKicked = Date.now();
+  try {
+    const r = await fetch(`https://api.github.com/repos/${keys.ghRepo}/actions/workflows/oura.yml/dispatches`,
+      {method: "POST", headers: ghHeaders({"Content-Type": "application/json"}), body: JSON.stringify({ref: "main"})});
+    if (r.status === 204) { ouraKickNote = ""; [45, 80, 130, 200].forEach(sec => setTimeout(() => syncOura(), sec * 1000)); renderBody(); return; }
+    ouraKicked = 0;
+    ouraKickNote = r.status === 404 ? "" : "To refresh Oura the moment you open the app, give this GitHub token Actions: Read and write. Until then the cloud updates every hour.";
+  } catch { ouraKicked = 0; }
+  renderOuraSettings();
+}
+const ouraStale = () => { const gen = Date.parse(state.oura.generated); return !gen || Date.now() - gen > 30 * 60e3; };
 async function syncOura(manual){
   if (!ouraOn() || ouraBusy) return;
   ouraBusy = true; ouraErr = ""; renderOuraSettings();
@@ -931,7 +946,7 @@ function renderOuraSettings(){
   $("ouraDisconnect").hidden = !ouraOn();
   const n = Object.keys(state.oura.days).length, gen = Date.parse(state.oura.generated);
   $("ouraMsg").className = "msg " + (ouraErr ? "err" : n ? "ok" : "");
-  $("ouraMsg").textContent = ouraErr || (n ? `Connected: ${n} days of data. Your Mac last uploaded ${gen ? ago(gen) : "at an unknown time"}.` : ouraOn() ? "" : "Not connected.");
+  $("ouraMsg").textContent = ouraErr || (n ? `Connected: ${n} days of data, last updated from Oura ${gen ? ago(gen) : "at an unknown time"}.${ouraKickNote ? " " + ouraKickNote : ""}` : ouraOn() ? "" : "Not connected.");
 }
 // Usual active burn: the median of the previous 14 days that have activity data.
 function usualActive(k){
@@ -969,8 +984,9 @@ function renderBody(){
   if (!ouraOn() && !Object.keys(state.oura.days).length) { card.hidden = true; return; }
   card.hidden = false;
   const gen = Date.parse(state.oura.generated);
-  const head = `<div class="body-head"><p class="eyebrow">Body · Oura</p><span>${gen ? `Mac uploaded ${ago(gen)}` : ""}</span></div>`;
-  if (!o) { card.innerHTML = head + `<p class="msg">${ouraErr ? esc(ouraErr) : `No Oura data for ${esc(dayName(k))} yet. It appears after your Mac's next sync.`}</p>`; return; }
+  const updating = ouraKicked && Date.now() - ouraKicked < 210e3;
+  const head = `<div class="body-head"><p class="eyebrow">Body · Oura</p><span>${updating ? "Updating from Oura…" : gen ? `Updated ${ago(gen)}` : ""}</span></div>`;
+  if (!o) { card.innerHTML = head + `<p class="msg">${ouraErr ? esc(ouraErr) : `No Oura data for ${esc(dayName(k))} yet. It appears after your ring syncs to the Oura app and the next cloud update.`}</p>`; return; }
   const tone = (v, good, bad) => v == null ? "" : v >= good ? "good" : v < bad ? "bad" : "";
   const vital = (v, unit, label, cls) => `<div class="vital ${cls||""}"><b class="num">${v == null ? "–" : v}${v != null && unit ? `<small> ${unit}</small>` : ""}</b><span>${label}</span></div>`;
   let html = head + `<div class="vitals">
@@ -1026,9 +1042,9 @@ function renderActivity(){
   if (!ouraOn() && !Object.keys(state.oura.days).length) {
     out.innerHTML = `<section class="card stack"><p class="msg">Connect your Oura ring to see calories burned, steps and workouts here.</p><div class="row-btns"><button type="button" class="primary" data-go="settings">Connect Oura in Settings</button></div></section>`; return;
   }
-  const gen = Date.parse(state.oura.generated), fresh = gen ? `Mac uploaded ${ago(gen)}` : "";
+  const gen = Date.parse(state.oura.generated), fresh = gen ? `Oura data updated ${ago(gen)}` : "";
   if (!o || (o.steps == null && o.active_kcal == null && !(o.workout_list || []).length)) {
-    out.innerHTML = `<section class="card stack"><p class="msg">No Oura activity for ${esc(dayName(k))} yet. It appears after your ring syncs to the Oura app and your Mac's next upload.</p><span class="hint">${esc(fresh)}</span></section>`; return;
+    out.innerHTML = `<section class="card stack"><p class="msg">No Oura activity for ${esc(dayName(k))} yet. It appears after your ring syncs to the Oura app and the next cloud update.</p><span class="hint">${esc(fresh)}</span></section>`; return;
   }
   const pcBar = (v, of) => of > 0 ? `<div class="mbar"><i style="width:${Math.min(100, v/of*100)}%"></i></div>` : "";
   let html = `<div class="act-grid">
@@ -1087,7 +1103,7 @@ function renderActivity(){
         (av[i] ? `<text class="val num" x="${x + bw/2}" y="${18 + ih - h - 5}" text-anchor="middle">${fmt(av[i])}</text>` : "") +
         `<text class="dl ${sel ? "sel" : ""}" x="${x + bw/2}" y="${H - 22}" text-anchor="middle">${parseKey(d).toLocaleDateString(undefined,{weekday:"short"})}</text>` +
         `<text class="num" x="${x + bw/2}" y="${H - 8}" text-anchor="middle">${sv[i] ? (sv[i] >= 1000 ? (sv[i]/1000).toFixed(1) + "k" : sv[i]) : "–"}</text>`; }).join("") + `</svg></section>`;
-  html += `<p class="credit">${esc(fresh)}${isToday ? " · today's numbers update with each upload" : ""}</p>`;
+  html += `<p class="credit">${esc(fresh)}${isToday ? " · open the Oura app to sync your ring, then this updates within a few minutes" : ""}</p>`;
   out.innerHTML = html;
 }
 $("actOut").addEventListener("click", e => {
@@ -1635,7 +1651,8 @@ $("dayLabel").addEventListener("click", () => $("today").click());
 let lastToday = keyOf(new Date());
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  if (ouraOn() && Date.now() - state.oura.fetched > 20 * 60000) syncOura();
+  if (ouraOn() && Date.now() - state.oura.fetched > 5 * 60000) syncOura();
+  if (ouraOn() && ouraStale()) kickOura();
   syncLedger();
   const now = keyOf(new Date());
   if (now !== lastToday) { if (state.date === lastToday) state.date = now; lastToday = now; $("fMeal").value = defaultMeal(); render(); }
@@ -2293,7 +2310,7 @@ $("ouraForm").addEventListener("submit", e => {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { ouraErr = "Enter the repo as owner/name and paste the token."; renderOuraSettings(); return; }
   keys = {...keys, ghRepo: repo, ghToken: token};
   try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch {}
-  document.activeElement.blur(); remoteLedger = {sha:null, etag:"", data:null}; syncOura(true); syncLedger(true);
+  document.activeElement.blur(); remoteLedger = {sha:null, etag:"", data:null}; syncOura(true); syncLedger(true); kickOura(true);
 });
 $("ouraDisconnect").addEventListener("click", () => {
   keys = {...keys, ghRepo:"", ghToken:""}; try { localStorage.setItem(KEYS_KEY, JSON.stringify(keys)); } catch {}
@@ -2454,7 +2471,7 @@ $("toastUndo").addEventListener("click", () => { if (undoFn) undoFn(); undoFn = 
 // ---------- start ----------
 $("fMeal").value = defaultMeal();
 setUnitUI(null); fillTargets(); fillProfile(); renderKeys(); renderOuraSettings(); render(); renderPlan();
-if (ouraOn()) syncOura(); syncLedger(); renderSync(); show(location.hash.slice(1) || "today");
+if (ouraOn()) { syncOura(); if (ouraStale()) kickOura(); } syncLedger(); renderSync(); show(location.hash.slice(1) || "today");
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
