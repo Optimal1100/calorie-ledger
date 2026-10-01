@@ -666,7 +666,7 @@ textarea.note{width:100%;border:1.5px solid transparent;background:var(--field);
   <div class="scan-frame" aria-hidden="true"></div>
   <div class="scan-bar">
     <p id="scanMsg">Point the camera at a barcode.</p>
-    <div class="row-btns"><button type="button" id="scanCancel">Cancel</button></div>
+    <div class="row-btns"><button type="button" id="torchBtn" hidden>Light</button><button type="button" id="scanCancel">Cancel</button></div>
   </div>
 </div>
 
@@ -1649,7 +1649,7 @@ function togglePanel(which){
   });
   refreshPhotoUI();
 }
-$("openBarcode").addEventListener("click", () => togglePanel("panelBarcode"));
+$("openBarcode").addEventListener("click", () => { togglePanel("panelBarcode"); loadReader().catch(() => {}); loadSwedishBarcodes(); });
 $("openPhoto").addEventListener("click", () => togglePanel("panelPhoto"));
 $("openText").addEventListener("click", () => { togglePanel("panelText"); if (!$("panelText").hidden) $("descText").focus(); });
 function wireFile(labelId, inputId, onFile){
@@ -1661,21 +1661,31 @@ function wireFile(labelId, inputId, onFile){
 }
 
 // --- barcode ---
-let zxingLoad = null;
-function loadZXing(){
-  if (window.ZXing) return Promise.resolve();
-  return zxingLoad ||= new Promise((res, rej) => {
+// Barcodes are read with ZXing C++ compiled to WebAssembly (vendor/), which is far faster and more accurate than the JavaScript port.
+const READ_OPTS = {formats: ["EAN13", "EAN8", "UPCA", "UPCE"], tryHarder: true, tryRotate: true, tryInvert: false, tryDownscale: true, maxNumberOfSymbols: 1};
+let wasmReady = null;
+function loadReader(){
+  return wasmReady ||= new Promise((res, rej) => {
     const s = document.createElement("script");
-    s.src = "vendor/zxing-0.21.3.min.js";
-    s.onload = res; s.onerror = () => { zxingLoad = null; rej(new Error("load")); };
+    s.src = "vendor/zxing-wasm-reader-3.1.4.js";
+    s.onload = () => window.ZXingWASM.prepareZXingModule({
+      overrides: {locateFile: (path, prefix) => path.endsWith(".wasm") ? new URL("vendor/zxing_reader.wasm", location.href).href : prefix + path},
+      fireImmediately: true}).then(res, rej);
+    s.onerror = () => rej(new Error("load"));
     document.head.appendChild(s);
-  });
+  }).catch(e => { wasmReady = null; throw new Error("load"); });
 }
-function barcodeHints(){
-  const Z = window.ZXing, hints = new Map();
-  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E, Z.BarcodeFormat.CODE_128]);
-  hints.set(Z.DecodeHintType.TRY_HARDER, true);
-  return hints;
+// EAN/UPC check digit, so a misread never gets looked up.
+function validGTIN(code){
+  if (!/^\d{8}$|^\d{12,14}$/.test(code)) return false;
+  const d = code.split("").map(Number), check = d.pop();
+  const sum = d.reverse().reduce((a, n, i) => a + n * (i % 2 ? 1 : 3), 0);
+  return (10 - sum % 10) % 10 === check;
+}
+async function readCodes(input){
+  const found = await window.ZXingWASM.readBarcodes(input, READ_OPTS);
+  const hit = (found || []).find(r => r.isValid && validGTIN(r.text));
+  return hit ? hit.text : null;
 }
 function loadImage(file){
   return new Promise((res, rej) => {
@@ -1695,32 +1705,37 @@ function drawTo(img, maxSide, rot){
   return c;
 }
 async function decodeBarcodePhoto(file){
-  const img = await loadImage(file);
   if ("BarcodeDetector" in window) {
-    try { const r = await new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128"]}).detect(img); if (r && r[0]) return r[0].rawValue; } catch {}
+    try { const img = await loadImage(file); const r = await new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e"]}).detect(img); const ok = r && r.find(x => validGTIN(x.rawValue)); if (ok) return ok.rawValue; } catch {}
   }
-  await loadZXing();
-  const Z = window.ZXing, hints = barcodeHints(), reader = new Z.MultiFormatReader();
-  for (const side of [1400, 900, 2200]) for (const rot of [false, true]) {
-    try { return reader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(drawTo(img, side, rot)))), hints).getText(); } catch {}
-  }
-  return null;
+  await loadReader();
+  return readCodes(file);
 }
 
-let scanReader = null;
+// Live scanner: grab the area inside the on-screen frame about 12 times a second and decode it.
+// A code is accepted once it has been read twice in a row, which filters out the odd misread.
+let scan = null;
 async function startScanner(){
   $("scanMsg").textContent = "Starting camera…";
+  $("torchBtn").hidden = true;
   $("scanner").hidden = false;
+  const video = $("scanVideo");
   try {
-    await loadZXing();
-    scanReader = new window.ZXing.BrowserMultiFormatReader(barcodeHints(), 250);
-    await scanReader.decodeFromConstraints({video:{facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:720}}}, $("scanVideo"), (result) => {
-      if (!result || !scanReader) return;
-      const code = result.getText();
-      stopScanner();
-      lookupCode(code);
-    });
-    $("scanMsg").textContent = "Point the camera at a barcode. Hold steady about a hand's length away.";
+    const [stream] = await Promise.all([
+      navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: "environment"}, width: {ideal: 1920}, height: {ideal: 1080}, frameRate: {ideal: 30}}}),
+      loadReader()]);
+    if ($("scanner").hidden) { stream.getTracks().forEach(t => t.stop()); return; }   // cancelled while starting
+    video.srcObject = stream; await video.play();
+    const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
+    const adv = [];
+    if (caps.focusMode && caps.focusMode.includes("continuous")) adv.push({focusMode: "continuous"});
+    // Phones with a big main camera can't focus up close; a little zoom lets you hold the phone further away and stay sharp.
+    if (caps.zoom && caps.zoom.max >= 1.6) adv.push({zoom: Math.min(2, caps.zoom.max)});
+    if (adv.length) track.applyConstraints({advanced: adv}).catch(() => {});
+    if (caps.torch) $("torchBtn").hidden = false;
+    scan = {stream, track, torch: false, last: "", streak: 0, busy: false, canvas: document.createElement("canvas"), timer: 0, started: Date.now()};
+    $("scanMsg").textContent = "Fit the barcode inside the frame. Hold steady about 15–25 cm away.";
+    scanTick();
   } catch (e) {
     stopScanner();
     const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
@@ -1730,13 +1745,47 @@ async function startScanner(){
       : "Couldn't start the camera on this device. Use a photo of the barcode instead."}</p>`;
   }
 }
+function frameCrop(video){
+  // Map the on-screen frame onto the camera image (the video is shown with object-fit: cover), with some margin.
+  const vw = video.videoWidth, vh = video.videoHeight, box = video.getBoundingClientRect(), fr = document.querySelector(".scan-frame").getBoundingClientRect();
+  const k = Math.max(box.width / vw, box.height / vh), ox = (box.width - vw * k) / 2, oy = (box.height - vh * k) / 2;
+  const mx = fr.width * 0.12, my = fr.height * 0.25;
+  const x = Math.max(0, (fr.left - box.left - mx - ox) / k), y = Math.max(0, (fr.top - box.top - my - oy) / k);
+  const w = Math.min(vw - x, (fr.width + 2 * mx) / k), h = Math.min(vh - y, (fr.height + 2 * my) / k);
+  return w > 20 && h > 20 ? {x, y, w, h} : {x: 0, y: 0, w: vw, h: vh};
+}
+async function scanTick(){
+  if (!scan) return;
+  const video = $("scanVideo");
+  if (!scan.busy && video.readyState >= 2 && video.videoWidth) {
+    scan.busy = true;
+    try {
+      const c = frameCrop(video), sc = Math.min(1, 1280 / c.w);
+      const cv = scan.canvas; cv.width = Math.round(c.w * sc); cv.height = Math.round(c.h * sc);
+      const ctx = cv.getContext("2d", {willReadFrequently: true});
+      ctx.drawImage(video, c.x, c.y, c.w, c.h, 0, 0, cv.width, cv.height);
+      const code = await readCodes(ctx.getImageData(0, 0, cv.width, cv.height));
+      if (scan && code) {
+        scan.streak = code === scan.last ? scan.streak + 1 : 1; scan.last = code;
+        if (scan.streak >= 2) { if (navigator.vibrate) navigator.vibrate(40); stopScanner(); lookupCode(code); return; }
+      }
+      if (scan && !code && Date.now() - scan.started > 8000) $("scanMsg").textContent = "Still looking. Move a little further away, avoid glare, and keep the bars sharp.";
+    } catch {} finally { if (scan) scan.busy = false; }
+  }
+  if (scan) scan.timer = setTimeout(scanTick, 80);
+}
 function stopScanner(){
-  if (scanReader) { try { scanReader.reset(); } catch {} scanReader = null; }
+  if (scan) { clearTimeout(scan.timer); scan.stream.getTracks().forEach(t => t.stop()); scan = null; }
   const v = $("scanVideo"); if (v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; }
   $("scanner").hidden = true;
 }
 $("startScan").addEventListener("click", startScanner);
 $("scanCancel").addEventListener("click", stopScanner);
+$("torchBtn").addEventListener("click", () => {
+  if (!scan) return; scan.torch = !scan.torch;
+  scan.track.applyConstraints({advanced: [{torch: scan.torch}]}).catch(() => {});
+  $("torchBtn").textContent = scan.torch ? "Light off" : "Light";
+});
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("scanner").hidden) stopScanner(); });
 
 const normCode = c => String(c || "").replace(/\D/g, "");
@@ -1830,7 +1879,7 @@ $("bcLookup").addEventListener("click", () => lookupCode($("bcCode").value));
 $("bcCode").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); lookupCode($("bcCode").value); } });
 
 // --- AI vision: Google Gemini (free tier) by default, or Claude when an Anthropic key is set ---
-const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.7-flash"];
+const GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.7-flash"];
 const MODEL_KEY = "calorie-ledger-model";
 let geminiPreferred = ""; try { geminiPreferred = localStorage.getItem(MODEL_KEY) || ""; } catch {}
 const aiNote = t => document.querySelectorAll(".ai-note").forEach(el => { el.textContent = t; });
@@ -1863,40 +1912,54 @@ function geminiSchema(x){
   for (const [k,v] of Object.entries(x)) if (k !== "additionalProperties") out[k] = geminiSchema(v);
   return out;
 }
-async function geminiJSON(file, prompt, schema, signal){
-  const parts = file ? [{inline_data: {mime_type: "image/jpeg", data: await toJpegBase64(file, 1568)}}, {text: prompt}] : [{text: prompt}];
-  const config = {responseMimeType: "application/json", responseSchema: geminiSchema(schema)};
-  const timeout = file ? 75000 : 45000;
-  // Start with the model that answered last time; if one is overloaded, slow or out of free quota, move straight to the next.
-  const order = [...new Set([geminiPreferred, ...GEMINI_MODELS].filter(Boolean))];
-  let last = {kind:"gemini", status:0};
-  for (const model of order) {
-    aiNote(`Asking ${model}…`);
-    // Low thinking keeps answers fast; a model that doesn't accept the setting gets the request again without it.
-    let r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: {...config, thinkingConfig: {thinkingLevel: "low"}}}, signal, timeout);
-    if (r.status === 400 && !/API key/i.test(r.detail)) r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: config}, signal, timeout);
-    if (r.ok) {
-      // A model can answer but with something unusable (cut off, blocked, not valid JSON). Treat that like a failure and try the next one.
-      const cand = ((r.data && r.data.candidates) || [])[0];
-      const blocked = !cand || (r.data.promptFeedback && r.data.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCK/.test(cand.finishReason || "");
-      const text = cand ? ((cand.content && cand.content.parts) || []).filter(p => !p.thought).map(p => p.text || "").join("") : "";
-      let parsed;
-      try { parsed = JSON.parse(text); } catch {}
-      if (parsed !== undefined && !blocked) {
-        if (geminiPreferred !== model) { geminiPreferred = model; try { localStorage.setItem(MODEL_KEY, model); } catch {} }
-        aiNote(""); return parsed;
-      }
-      last = blocked ? {kind:"refused", model} : {kind: cand && cand.finishReason === "MAX_TOKENS" ? "truncated" : "badjson", model};
-      aiNote(`${model} gave an unusable answer, trying another…`);
-      continue;
-    }
-    last = {kind:"gemini", status: r.status, model, detail: r.detail, badKey: /API key not valid|API_KEY_INVALID/i.test(r.detail)};
-    if (last.badKey || r.status === 401) throw last;
-    if (r.status === 0 && navigator.onLine === false) throw {kind:"offline"};
-    aiNote(`${model} didn't answer, trying another…`);
+// One model, one answer: returns {value} on success or {err, fatal}.
+async function geminiTry(model, parts, config, signal, timeout){
+  let r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: {...config, thinkingConfig: {thinkingLevel: "minimal"}}}, signal, timeout);
+  if (r.status === 400 && !/API key/i.test(r.detail)) r = await geminiCall(model, {contents: [{role: "user", parts}], generationConfig: config}, signal, timeout);
+  if (!r.ok) {
+    const err = {kind:"gemini", status: r.status, model, detail: r.detail, badKey: /API key not valid|API_KEY_INVALID/i.test(r.detail)};
+    return {err, fatal: err.badKey || r.status === 401};
   }
-  aiNote("");
-  throw last;
+  // A model can answer with something unusable (cut off, blocked, not JSON); that counts as a failure.
+  const cand = ((r.data && r.data.candidates) || [])[0];
+  const blocked = !cand || (r.data.promptFeedback && r.data.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCK/.test(cand.finishReason || "");
+  const text = cand ? ((cand.content && cand.content.parts) || []).filter(p => !p.thought).map(p => p.text || "").join("") : "";
+  try { if (!blocked) return {value: JSON.parse(text)}; } catch {}
+  return {err: blocked ? {kind:"refused", model} : {kind: cand && cand.finishReason === "MAX_TOKENS" ? "truncated" : "badjson", model}};
+}
+// Ask the fastest model first. If it hasn't answered within a few seconds, ask the next one too and take whichever answers first.
+async function geminiJSON(file, prompt, schema, signal){
+  const parts = file ? [{inline_data: {mime_type: "image/jpeg", data: await toJpegBase64(file, 1280)}}, {text: prompt}] : [{text: prompt}];
+  const config = {responseMimeType: "application/json", responseSchema: geminiSchema(schema), temperature: 0.2};
+  const timeout = file ? 45000 : 30000, HEDGE_MS = file ? 6000 : 4000;
+  const order = [...new Set([geminiPreferred, ...GEMINI_MODELS].filter(Boolean))];
+  return new Promise((resolve, reject) => {
+    let next = 0, running = 0, done = false, last = {kind:"gemini", status:0}, hedge = null;
+    const ctls = [];
+    const finish = (ok, v) => { if (done) return; done = true; clearTimeout(hedge); ctls.forEach(c => c.abort()); aiNote(""); (ok ? resolve : reject)(v); };
+    if (signal) { if (signal.aborted) return finish(false, {kind:"cancelled"}); signal.addEventListener("abort", () => finish(false, {kind:"cancelled"})); }
+    const launch = () => {
+      if (done || next >= order.length) return;
+      const model = order[next++], ctl = new AbortController(); ctls.push(ctl); running++;
+      aiNote(running > 1 ? "Asking a second model in parallel…" : `Asking ${model}…`);
+      geminiTry(model, parts, config, ctl.signal, timeout).catch(() => ({err: {kind:"cancelled"}})).then(r => {
+        running--;
+        if (done) return;
+        if (r.value !== undefined) {
+          if (geminiPreferred !== model) { geminiPreferred = model; try { localStorage.setItem(MODEL_KEY, model); } catch {} }
+          return finish(true, r.value);
+        }
+        if (r.err.kind !== "cancelled") last = r.err;
+        if (r.fatal) return finish(false, r.err);
+        if (r.err.status === 0 && navigator.onLine === false) return finish(false, {kind:"offline"});
+        if (next < order.length) { clearTimeout(hedge); launch(); }
+        else if (!running) finish(false, last);
+      });
+      clearTimeout(hedge);
+      hedge = setTimeout(() => { if (!done && next < order.length) launch(); }, HEDGE_MS);
+    };
+    launch();
+  });
 }
 let AnthropicSDK = null;
 async function claudeJSON(file, prompt, schema, signal){
@@ -1961,13 +2024,13 @@ async function toJpegBase64(file, maxSide){
 }
 const NUMS = {kcal:{type:"number"}, protein_g:{type:"number"}, carbs_g:{type:"number"}, fat_g:{type:"number"}};
 const LABEL_SCHEMA = {type:"object", additionalProperties:false,
-  required:["found","name","serving","serving_grams","kcal","protein_g","carbs_g","fat_g","source", ...MICRO_REQ],
-  properties:{found:{type:"boolean"}, name:{type:"string"}, serving:{type:"string"}, serving_grams:{type:"number"}, ...NUMS, ...MICRO_PROPS,
+  required:["found","name","serving","serving_grams","kcal","protein_g","carbs_g","fat_g","source"],
+  properties:{found:{type:"boolean"}, name:{type:"string"}, serving:{type:"string"}, serving_grams:{type:"number"}, ...NUMS,
     source:{type:"string", enum:["label","estimate","none"]}}};
 const MEAL_SCHEMA = {type:"object", additionalProperties:false, required:["items","confidence","notes"],
   properties:{
-    items:{type:"array", items:{type:"object", additionalProperties:false, required:["name","portion","kcal","protein_g","carbs_g","fat_g", ...MICRO_REQ],
-      properties:{name:{type:"string"}, portion:{type:"string"}, ...NUMS, ...MICRO_PROPS}}},
+    items:{type:"array", items:{type:"object", additionalProperties:false, required:["name","portion","kcal","protein_g","carbs_g","fat_g"],
+      properties:{name:{type:"string"}, portion:{type:"string"}, ...NUMS}}},
     confidence:{type:"string", enum:["low","medium","high"]},
     notes:{type:"string"}}};
 
@@ -1979,13 +2042,12 @@ async function readLabel(file){
       "This photo shows a packaged food product: its Nutrition Facts panel, the front of the pack, or its barcode. " +
       "Identify the product and give calories, protein, carbohydrate and fat for ONE serving as printed on the label, plus the serving size text and its weight in grams (0 if not printed). " +
       "If no nutrition panel is readable but you recognise the product, give typical values and set source to \"estimate\". " +
-      "Also give micronutrients for the same amount: fibre, sugars, saturated fat and omega-3 in grams; sodium, potassium, calcium, iron, magnesium, zinc and vitamin C in milligrams; vitamin D, B12, A (RAE) and folate (DFE) in micrograms. Use the label's values where printed and estimate the rest from typical values for this kind of product. " +
       "If you cannot identify the food at all, set found to false, source to \"none\", and use empty strings and zeros for the rest.",
       LABEL_SCHEMA);
     const w = $("lblWork"); if (w) w.remove();
     if (!r.found || !(r.kcal >= 0)) { box.insertAdjacentHTML("beforeend", `<p class="msg err">Couldn't read that package. Try a closer photo of the Nutrition Facts panel, or type the values below.</p>`); return; }
     const name = (String(r.name || "Packaged food").slice(0,80) + (r.serving ? ` (${String(r.serving).slice(0,30)})` : "")).trim();
-    fillForm({name, kcal:Math.round(r.kcal), p:r1(r.protein_g), c:r1(r.carbs_g), f:r1(r.fat_g), unit:"serving", source: r.source === "estimate" ? "AI estimate" : "Read from label", m:fromAIMicros(r), mEst:true});
+    fillForm({name, kcal:Math.round(r.kcal), p:r1(r.protein_g), c:r1(r.carbs_g), f:r1(r.fat_g), unit:"serving", source: r.source === "estimate" ? "AI estimate" : "Read from label"});
     box.insertAdjacentHTML("beforeend", `<p class="msg ok">${r.source === "estimate" ? "Estimated" : "Read from the label"}: ${esc(name)}. Check the numbers below, then add it. The barcode will be remembered.</p>`);
     focusAmount();
   } catch (err) {
@@ -2003,9 +2065,8 @@ function refreshPhotoUI(){
   $("mealGo").disabled = !mealFile || !hasAI() || !!mealCtl;
   $("descGo").disabled = !$("descText").value.trim() || !hasAI() || !!mealCtl;
 }
-const MICRO_ASK = "Also give micronutrients for the same amount: fibre, sugars, saturated fat and omega-3 in grams; sodium, potassium, calcium, iron, magnesium, zinc and vitamin C in milligrams; vitamin D, B12, A (RAE) and folate (DFE) in micrograms. ";
 const toMealItems = r => (r.items || []).slice(0, 20).map(it => ({on:true, name:String(it.name || "Food").slice(0,80), portion:String(it.portion || "").slice(0,40),
-  kcal:Math.max(0, Math.round(+it.kcal || 0)), p:r1(it.protein_g), c:r1(it.carbs_g), f:r1(it.fat_g), m:fromAIMicros(it)}));
+  kcal:Math.max(0, Math.round(+it.kcal || 0)), p:r1(it.protein_g), c:r1(it.carbs_g), f:r1(it.fat_g)}));
 // --- describe a meal in words ---
 $("descText").addEventListener("input", refreshPhotoUI);
 $("textGotoKey").addEventListener("click", () => $("gotoKey").click());
@@ -2015,13 +2076,12 @@ $("descGo").addEventListener("click", async () => {
   if (!text || !hasAI() || mealCtl) return;
   mealTarget = "descOut"; $("mealOut").innerHTML = "";
   mealCtl = new AbortController(); refreshPhotoUI(); $("descStop").hidden = false;
-  $("descOut").innerHTML = working("Working out what's in your meal…");
+  $("descOut").innerHTML = working("Estimating…");
   try {
     const r = await aiJSON(null,
       "You are a careful nutrition estimator. A person describes what they ate, in English or Swedish. Split it into each distinct food or drink. " +
       "Use the amounts they give; where they give none, assume a typical single portion as served in Sweden and say the amount you assumed in the portion field (grams or common units). " +
       "For each item estimate calories plus protein, carbohydrate and fat in grams for that portion, including cooking fat, spreads, sauces and dressings they mention or that the dish normally contains. " +
-      MICRO_ASK +
       "Write each item's name in the same language the person used. Set confidence to low, medium or high, and use notes (in English) for one short sentence on the biggest assumption you made. " +
       "If the text doesn't describe any food or drink, return an empty items list and say so in notes.\n\nWhat they ate: \"" + text.replace(/"/g, "'") + "\"",
       MEAL_SCHEMA, mealCtl.signal);
@@ -2047,13 +2107,12 @@ $("mealGo").addEventListener("click", async () => {
   if (!mealFile || !hasAI() || mealCtl) return;
   mealTarget = "mealOut"; $("descOut").innerHTML = "";
   mealCtl = new AbortController(); refreshPhotoUI(); $("mealStop").hidden = false;
-  $("mealOut").innerHTML = working("Looking at your meal… this can take up to a minute.");
+  $("mealOut").innerHTML = working("Looking at your meal…");
   const note = $("mealNote").value.trim().slice(0, 500);
   try {
     const r = await aiJSON(mealFile,
       "You are a careful nutrition estimator. The photo shows a meal or snack. Identify each distinct food or drink, estimate its portion (grams or common units), " +
       "and estimate calories plus protein, carbohydrate and fat in grams for that portion. Account for likely cooking oil, butter, sauces and dressings. " +
-      "Also give micronutrients for the same amount: fibre, sugars, saturated fat and omega-3 in grams; sodium, potassium, calcium, iron, magnesium, zinc and vitamin C in milligrams; vitamin D, B12, A (RAE) and folate (DFE) in micrograms. " +
       (note ? `The person eating it adds: "${note}". ` : "") +
       "Set confidence to low, medium or high, and use notes for one short sentence on the biggest uncertainty. If there is no food in the photo, return an empty items list and say why in notes.",
       MEAL_SCHEMA, mealCtl.signal);
@@ -2105,11 +2164,11 @@ const onMealClick = e => {
   const meal = $("fMeal").value, day = state.date;
   const added = mealItems.filter(i => i.on).map(it => {
     const name = it.name.trim() || "Food";
-    return {id:uid(), name, meal, kcal:Math.round(it.kcal), p:r1(it.p), c:r1(it.c), f:r1(it.f), m:it.m, mEst:true,
-      base:{name, kcal:Math.round(it.kcal), p:it.p, c:it.c, f:it.f, unit:"serving", source:"AI estimate", m:it.m, mEst:true}, t:Date.now(), src: mealTarget === "descOut" ? "text" : "photo"};
+    return {id:uid(), name, meal, kcal:Math.round(it.kcal), p:r1(it.p), c:r1(it.c), f:r1(it.f),
+      base:{name, kcal:Math.round(it.kcal), p:it.p, c:it.c, f:it.f, unit:"serving", source:"AI estimate"}, t:Date.now(), src: mealTarget === "descOut" ? "text" : "photo"};
   });
   state.days[day] = [...entriesFor(day), ...added];
-  persist(); render(); show("today");
+  persist(); render(); show("today"); enrichErr = ""; queueEnrich();
   toast(`Added ${added.length} ${added.length===1?"item":"items"} · ${fmt(added.reduce((a,x) => a + x.kcal, 0))} kcal`, () => {
     const ids = new Set(added.map(x => x.id));
     state.days[day] = entriesFor(day).filter(x => !ids.has(x.id)); persist(); render();
