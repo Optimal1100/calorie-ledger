@@ -784,18 +784,18 @@ const titleCase = s => s.toLowerCase().replace(/(^|[\s,(\/-])([a-z])/g, (m,a,b) 
 // ---------- storage (this device) ----------
 const state = { settings:{...DEFAULTS}, days:{}, barcodes:{}, coach:{focus:"overall energy and health", about:""}, reviews:{},
   profile:{units:"metric", sex:"", age:"", weightKg:"", heightCm:"", activity:"moderate", notes:""}, microRefs:null, plan:null,
-  oura:{fetched:0, generated:"", days:{}}, dayTargets:{}, deleted:{}, stamps:{}, date:keyOf(new Date()) };
+  oura:{fetched:0, generated:"", days:{}}, dayTargets:{}, deleted:{}, stamps:{}, ingr:{}, date:keyOf(new Date()) };
 let keys = {gemini:"", anthropic:"", usda:"", ghRepo:"", ghToken:""};
 const hasAI = () => !!(keys.gemini || keys.anthropic);
 try {
   const raw = localStorage.getItem(LS_KEY);
   if (raw) { const o = JSON.parse(raw); state.settings = {...DEFAULTS, ...(o.settings||{})}; state.days = o.days || {}; state.barcodes = o.barcodes || {}; state.coach = {...state.coach, ...(o.coach||{})}; state.reviews = o.reviews || {};
     state.profile = {...state.profile, ...(o.profile||{})}; state.microRefs = o.microRefs || null; state.plan = o.plan || null;
-    if (o.oura && o.oura.days) state.oura = o.oura; state.dayTargets = o.dayTargets || {}; state.deleted = o.deleted || {}; state.stamps = o.stamps || {}; }
+    if (o.oura && o.oura.days) state.oura = o.oura; state.dayTargets = o.dayTargets || {}; state.deleted = o.deleted || {}; state.stamps = o.stamps || {}; state.ingr = o.ingr || {}; }
   const k = localStorage.getItem(KEYS_KEY); if (k) keys = {...keys, ...JSON.parse(k)};
 } catch {}
 function saveLocal(){
-  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews, profile:state.profile, microRefs:state.microRefs, plan:state.plan, oura:state.oura, dayTargets:state.dayTargets, deleted:state.deleted, stamps:state.stamps})); }
+  try { localStorage.setItem(LS_KEY, JSON.stringify({settings:state.settings, days:state.days, barcodes:state.barcodes, coach:state.coach, reviews:state.reviews, profile:state.profile, microRefs:state.microRefs, plan:state.plan, oura:state.oura, dayTargets:state.dayTargets, deleted:state.deleted, stamps:state.stamps, ingr:state.ingr})); }
   catch { toast("Couldn't save. Your device storage may be full."); }
 }
 function persist(){ trackChanges(); saveLocal(); scheduleSync(); try { scheduleReview(); } catch {} }
@@ -826,7 +826,7 @@ function setSyncBase(){ syncBase = null; trackChanges(); }
   SECTIONS.forEach(k => { if (!state.stamps[k] && JSON.stringify(state[k] ?? null) !== JSON.stringify(fresh[k])) state.stamps[k] = 1; });
 }
 setSyncBase();
-const ledgerSnapshot = () => ({v:1, days:state.days, deleted:state.deleted, stamps:state.stamps, barcodes:state.barcodes, reviews:state.reviews,
+const ledgerSnapshot = () => ({v:1, days:state.days, deleted:state.deleted, stamps:state.stamps, barcodes:state.barcodes, reviews:state.reviews, ingr:state.ingr,
   ...Object.fromEntries(SECTIONS.map(k => [k, state[k] ?? null]))});
 const stable = v => JSON.stringify(v, (_, x) => x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map(k => [k, x[k]])) : x);
 function mergeLedger(a, b){
@@ -841,7 +841,7 @@ function mergeLedger(a, b){
   const days = {};
   byId.forEach(({day, e}) => { if ((deleted[e.id] || 0) >= (e.u || e.t || 0)) return; (days[day] ||= []).push(e); });
   Object.values(days).forEach(list => list.sort((x, y) => (x.t || 0) - (y.t || 0)));
-  const out = {v:1, days, deleted, stamps:{}, barcodes:{...(b.barcodes || {}), ...(a.barcodes || {})}, reviews:{}};
+  const out = {v:1, days, deleted, stamps:{}, barcodes:{...(b.barcodes || {}), ...(a.barcodes || {})}, reviews:{}, ingr:{...(b.ingr || {}), ...(a.ingr || {})}};
   SECTIONS.forEach(k => {
     const sa = (a.stamps || {})[k] || 0, sb = (b.stamps || {})[k] || 0, useB = sb >= sa;   // a = this device, b = the repo; ties go to the repo so devices agree
     out[k] = (useB ? b[k] : a[k]) ?? null; if (Math.max(sa, sb)) out.stamps[k] = Math.max(sa, sb);
@@ -853,7 +853,7 @@ function mergeLedger(a, b){
   return out;
 }
 function applyLedger(m){
-  state.days = m.days; state.deleted = m.deleted; state.stamps = m.stamps; state.barcodes = m.barcodes; state.reviews = m.reviews;
+  state.days = m.days; state.deleted = m.deleted; state.stamps = m.stamps; state.barcodes = m.barcodes; state.reviews = m.reviews; state.ingr = m.ingr || {};
   state.settings = {...DEFAULTS, ...(m.settings || {})}; state.profile = {...state.profile, ...(m.profile || {})}; state.coach = {...state.coach, ...(m.coach || {})};
   state.microRefs = m.microRefs || null; state.plan = m.plan || null; state.dayTargets = m.dayTargets || {};
   setSyncBase(); saveLocal();
@@ -1490,7 +1490,7 @@ function addEntry(food, q, meal){
   if (food.m) { e.m = scaleMicros(food.m, m); if (food.mEst) e.mEst = true; }
   const day = state.date;
   state.days[day] = [...entriesFor(day), e];
-  persist(); render(); show("today"); enrichErr = ""; queueEnrich();
+  persist(); render(); show("today"); enrichErr = ""; queueEnrich(); setTimeout(decomposeFoods, 4000);
   toast(`Added ${e.name} · ${fmt(e.kcal)} kcal`, () => removeEntry(e.id, true, day));
 }
 function removeEntry(id, silent, date = state.date){
@@ -2290,7 +2290,7 @@ const onMealClick = e => {
       base:{name, kcal:Math.round(it.kcal), p:it.p, c:it.c, f:it.f, unit:"serving", source:"AI estimate"}, t:Date.now(), src: mealTarget === "descOut" ? "text" : "photo"};
   });
   state.days[day] = [...entriesFor(day), ...added];
-  persist(); render(); show("today"); enrichErr = ""; queueEnrich();
+  persist(); render(); show("today"); enrichErr = ""; queueEnrich(); setTimeout(decomposeFoods, 4000);
   toast(`Added ${added.length} ${added.length===1?"item":"items"} · ${fmt(added.reduce((a,x) => a + x.kcal, 0))} kcal`, () => {
     const ids = new Set(added.map(x => x.id));
     state.days[day] = entriesFor(day).filter(x => !ids.has(x.id)); persist(); render();
@@ -2378,6 +2378,69 @@ function topSources(foods, key, unit, n){
   return foods.filter(f => f.usual[key] > 0).sort((a, b) => b.usual[key] * (1 + 0.15 * Math.min(b.n, 6)) - a.usual[key] * (1 + 0.15 * Math.min(a.n, 6))).slice(0, n)
     .map(f => `${f.name} (usual portion ~${Math.round(f.usual.kcal)} kcal gives ${mfmt(f.usual[key], unit)}, logged ${f.n}x)`);
 }
+// ---------- ingredients: every logged food is broken down once into plain ingredients ----------
+// "School lunch: fiskgratäng" becomes salmon, potatoes, cream… so the coach can suggest ingredients, not one-off dishes.
+const foodKey = e => (((e.base && e.base.name) || e.name || "").replace(/\s*·.*$/, "").trim().toLowerCase());
+const INGR_SCHEMA = {type:"object", additionalProperties:false, required:["foods"], properties:{foods:{type:"array", items:{type:"object", additionalProperties:false,
+  required:["n","kind","ingredients"], properties:{n:{type:"integer"}, kind:{type:"string", enum:["ingredient","product","dish"]},
+    ingredients:{type:"array", items:{type:"object", additionalProperties:false, required:["name","grams","kcal","protein_g","carbs_g","fat_g","fiber_g"],
+      properties:{name:{type:"string"}, grams:{type:"number"}, kcal:{type:"number"}, protein_g:{type:"number"}, carbs_g:{type:"number"}, fat_g:{type:"number"}, fiber_g:{type:"number"}}}}}}}}};
+let ingrBusy = null;
+function decomposeFoods(){
+  if (!hasAI()) return Promise.resolve();
+  if (ingrBusy) return ingrBusy;
+  const today = keyOf(new Date()), todo = new Map();
+  for (let i = 0; i <= 90 && todo.size < 30; i++) for (const e of entriesFor(shift(today, -i))) {
+    const key = foodKey(e); if (key && !state.ingr[key] && !todo.has(key)) todo.set(key, e);
+    if (todo.size >= 30) break;
+  }
+  if (!todo.size) return Promise.resolve();
+  const list = [...todo.entries()];
+  ingrBusy = aiJSON(null,
+    "Break each logged food below into its main ingredients, for the portion described (calories and macros given are for that portion). " +
+    "Name every ingredient with a short generic English name in lower case, the way someone would shop for it (e.g. \"salmon\", \"white rice\", \"broccoli\", \"quark\", \"oats\", \"chicken breast\", \"rye bread\", \"cheese\"), not a brand or dish name. " +
+    "Merge minor items (spices, salt, small amounts of sauce) into the closest main ingredient. Give grams and calories, protein, carbohydrate, fat and fibre for each ingredient; together they should add up to the food's totals. " +
+    "kind: \"ingredient\" if the food is itself a basic ingredient, \"product\" if it's a packaged product people buy as-is (yoghurt, protein bar, bread), \"dish\" if it's a cooked or composed meal (school or canteen lunch, restaurant food, home-cooked dish).\n\n" +
+    list.map(([key, e], i) => `${i + 1}. ${(e.base && e.base.name) || e.name} | ${e.kcal} kcal, protein ${e.p || 0} g, carbs ${e.c || 0} g, fat ${e.f || 0} g`).join("\n"),
+    INGR_SCHEMA).then(r => {
+      (r.foods || []).forEach(f => { const item = list[(+f.n || 0) - 1]; if (!item) return;
+        const [key, e] = item;
+        state.ingr[key] = {kind: f.kind, kcal: +e.kcal || 0, items: (f.ingredients || []).slice(0, 12).map(x => ({name: String(x.name || "").toLowerCase().trim().slice(0, 40), g: r1(x.grams), kcal: r1(x.kcal), p: r1(x.protein_g), c: r1(x.carbs_g), f: r1(x.fat_g), fiber: r1(x.fiber_g)})).filter(x => x.name)};
+      });
+      persist();
+    }).catch(() => {}).finally(() => { ingrBusy = null; });
+  return ingrBusy;
+}
+// How this person eats each ingredient: days eaten, last eaten, and a typical amount with its nutrients.
+function ingredientStats(){
+  const today = keyOf(new Date()), map = new Map();
+  for (let i = 0; i <= 90; i++) { const d = shift(today, -i);
+    for (const e of entriesFor(d)) {
+      const dec = state.ingr[foodKey(e)]; if (!dec || !dec.items.length) continue;
+      const k = dec.kcal > 0 && e.kcal > 0 ? e.kcal / dec.kcal : 1;
+      for (const x of dec.items) {
+        if (!map.has(x.name)) map.set(x.name, {name: x.name, days: new Set(), last: null, rows: [], dish: 0});
+        const r = map.get(x.name); r.days.add(d); if (!r.last || d > r.last) r.last = d; if (dec.kind === "dish") r.dish++;
+        r.rows.push({g: x.g * k, kcal: x.kcal * k, p: x.p * k, c: x.c * k, fiber: x.fiber * k});
+      }
+    }
+  }
+  return [...map.values()].map(r => ({name: r.name, days: r.days.size, last: r.last, onlyInDishes: r.dish === r.rows.length,
+    g: median(r.rows.map(x => x.g)), kcal: median(r.rows.map(x => x.kcal)), p: median(r.rows.map(x => x.p)), c: median(r.rows.map(x => x.c)), fiber: median(r.rows.map(x => x.fiber))}));
+}
+const lastEaten = d => { const n = Math.round((parseKey(keyOf(new Date())) - parseKey(d)) / 864e5); return n === 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`; };
+function ingredientLines(){
+  const all = ingredientStats().filter(x => x.g >= 5);
+  if (!all.length) return "";
+  const fmtI = x => `${x.name} (typical ${Math.round(x.g)} g: ${Math.round(x.kcal)} kcal, P ${r1(x.p)} g, C ${r1(x.c)} g, fibre ${r1(x.fiber)} g; eaten on ${x.days} ${x.days === 1 ? "day" : "days"}, last ${lastEaten(x.last)}${x.onlyInDishes ? "; so far only as part of dishes" : ""})`;
+  const rank = (key, n) => all.filter(x => x[key] > 0).sort((a, b) => (b[key] / Math.max(b.kcal, 40)) * Math.min(b.days, 6) - (a[key] / Math.max(a.kcal, 40)) * Math.min(a.days, 6)).slice(0, n);
+  const used = new Set(), pick = (label, key, n) => { const top = rank(key, n); top.forEach(x => used.add(x.name)); return top.length ? `${label}: ${top.map(fmtI).join("; ")}` : ""; };
+  const lines = [pick("Best protein sources", "p", 6), pick("Best fibre sources", "fiber", 5), pick("Best carbohydrate sources", "c", 5)];
+  const often = all.filter(x => !used.has(x.name)).sort((a, b) => b.days - a.days).slice(0, 12);
+  if (often.length) lines.push(`Other ingredients they eat (for vitamins and minerals, use your knowledge of what each contains): ${often.map(fmtI).join("; ")}`);
+  return lines.filter(Boolean).join("\n");
+}
+
 function reviewPrompt(k){
   const s = targetsFor(k), es = entriesFor(k), t = totals(es), now = new Date(), isToday = k === keyOf(now), R = microRefs(), mt = microTotals(es);
   const lines = MEALS.map(([mk, mn]) => {
@@ -2406,11 +2469,12 @@ function reviewPrompt(k){
     `\n\nLogged ${isToday ? "so far today" : "that day"}:\n${lines}` +
     `\nTotals: ${Math.round(t.kcal)} kcal, ${r1(t.p)} g protein, ${r1(t.c)} g carbohydrate, ${r1(t.f)} g fat.` +
     `\nMicronutrients (approximate): ${microLine}.` +
-    (sourceLists ? `\n\nFoods this person already eats, best sources first, with their usual portion:\n${sourceLists}` : "") +
+    (ingredientLines() ? `\n\nIngredients this person has actually eaten in the last 90 days, worked out by breaking down everything they logged:\n${ingredientLines()}` :
+      sourceLists ? `\n\nFoods this person already eats, best sources first, with their usual portion:\n${sourceLists}` : "") +
     `\n\nRules:` +
     (isToday ? `\n- Judge the day so far against the pace above, not against full-day targets. Being below the daily totals early in the day is expected and must not be called a problem. Only flag calories, protein or a nutrient as low or high if it's clearly off pace or can't realistically be caught up with the meals left today.` : "") +
     `\n- Use the Oura data and their body measurements: adjust for training, burn, sleep and recovery, and scale protein to body weight. Say briefly how today's body data changes the advice when it does.` +
-    `\n- When you recommend foods, use the foods they already eat (from the list above) with their usual portion and what it adds, e.g. "Kvarg naturell, your usual 250 g (+25 g protein)". Only when none fits, suggest something new and mark it "(new idea)".` +
+    `\n- Recommend ingredients, not dishes. Pick from the ingredients they've actually eaten (list above), say how much in grams and what it adds, and anchor it to when they had it, e.g. "150 g salmon, like yesterday (+30 g protein)" or "a bowl of oats with quark, as at breakfast". Combine 1-3 ingredients into something simple they could make, buy or eat at home today. Never tell them to eat a specific school, canteen or restaurant dish again. Only when nothing in their list fits, suggest a common ingredient and mark it "(new idea)".` +
     `\n- Be specific and practical, no generic advice. Micronutrient numbers are estimates, so ignore small differences. No medical advice; only mention supplements if food clearly can't cover a gap.` +
     `\n\nReturn: score (0-100: how well ${isToday ? "the day so far, given the time, supports their focus" : "the day supported their focus"}); headline (one plain sentence, under 14 words); pace (one short sentence on where they stand ${isToday ? "for this time of day" : "for the day"}); wins (1-3 short specific things going well); gaps (0-3 of the most important real issues, most important first, each with a short name, a one-or-two-sentence why tied to performance and their data, and 1-3 foods as described above; leave empty if nothing needs fixing); next (${isToday ? "the best thing to eat at their next meal or snack, with amounts, using their own foods" : "the one change to make tomorrow, using their own foods"}).`;
 }
@@ -2418,7 +2482,8 @@ async function runReview(k, auto){
   if (!entriesFor(k).length || !hasAI() || rvCtl) return;
   rvCtl = new AbortController(); rvError = ""; renderReview();
   try {
-    enrichErr = ""; clearTimeout(enrichTimer); await enrichDay(k); // fill in missing micronutrients first so the review can use them
+    enrichErr = ""; clearTimeout(enrichTimer);
+    await Promise.all([enrichDay(k), decomposeFoods()]); // micronutrients and ingredient breakdowns first, so the review can use them
     const stamp = dayStamp(k), focus = state.coach.focus;
     const result = await aiJSON(null, reviewPrompt(k), REVIEW_SCHEMA, rvCtl.signal);
     state.reviews[k] = {at: Date.now(), stamp, focus, result, auto: !!auto};
