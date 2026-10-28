@@ -1,7 +1,8 @@
-// Offline support: the app shell is cached; food lookups and AI calls always go to the network.
-const CACHE = "ledger-v22";
-const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./vendor/zxing-wasm-reader-3.1.4.js", "./vendor/zxing_reader.wasm",
-  "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./data/livsmedel.json"];
+// Offline support. The app's own code (page, scripts, styles) is network-first so a release shows up on the next open,
+// with the cached copy used offline. Vendor files and icons are cache-first. Food lookups and AI calls always go to the network.
+const CACHE = "ledger-v23";
+const SHELL = ["./", "./index.html", "./css/app.css", "./js/app.js", "./js/core.js", "./js/ai.js", "./manifest.webmanifest",
+  "./vendor/zxing-wasm-reader-3.1.4.js", "./vendor/zxing_reader.wasm", "./icons/icon-180.png", "./icons/icon-192.png", "./icons/icon-512.png", "./data/livsmedel.json"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -11,14 +12,16 @@ self.addEventListener("activate", e => {
     .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
+const put = (req, res) => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); } return res; };
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.includes("/tests/")) return;
   if (e.request.mode === "navigate") {
-    // Network first so updates show up; fall back to the cached page offline.
-    e.respondWith(fetch(e.request)
-      .then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put("./index.html", copy)); return r; })
-      .catch(() => caches.match("./index.html")));
+    e.respondWith(fetch(e.request).then(r => put(new Request("./index.html"), r)).catch(() => caches.match("./index.html")));
+    return;
+  }
+  if (/\/(js|css)\/[^/]+$/.test(url.pathname) || url.pathname.endsWith("manifest.webmanifest")) {
+    e.respondWith(fetch(e.request, {cache: "no-cache"}).then(r => put(e.request, r)).catch(() => caches.match(e.request)));
     return;
   }
   // Bundled food data refreshes weekly: answer from the cache straight away and fetch a fresh copy for next time.
@@ -31,9 +34,5 @@ self.addEventListener("fetch", e => {
     }));
     return;
   }
-  // Everything else from this site (scripts, icons, the bundled food and barcode data): cache first, and keep what gets fetched.
-  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(r => {
-    if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
-    return r;
-  })));
+  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(r => put(e.request, r))));
 });

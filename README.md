@@ -1,10 +1,13 @@
 # Calorie Ledger
 
-A calorie and macro tracker that installs on an iPhone home screen. Plain HTML, CSS and JavaScript with no build step.
+A calorie and macro tracker that installs on an iPhone home screen. Plain HTML, CSS and JavaScript modules with no build step.
+
+- `index.html` markup, `css/app.css` the design system, `js/app.js` the app, `js/core.js` pure logic (number input, units and portions, nutrition maths, AI result validation, sync merge), `js/ai.js` the Gemini/Claude client.
 
 - **Food search**: the Swedish Food Agency's food database (2,600 foods, Swedish and English names, full micronutrients) bundled in `data/livsmedel.json` and searched on the device, plus online search of USDA FoodData Central.
 - **Barcode scanner**: live camera scanning (ZXing). Looked up in a bundled table of Swedish products from Open Food Facts (`data/barcodes-se.json`), then Open Food Facts live, then USDA's branded foods.
-- **Meal photos**: AI estimates each item's calories and macros. Uses a free Google Gemini API key (aistudio.google.com/apikey) entered in the app's settings, or an Anthropic key if you set one.
+- **Meal photos and descriptions**: the AI identifies each component and estimates its edible grams and nutrition per 100 g; the app does the arithmetic, swaps in Livsmedelsverket values where a component clearly matches, and shows an editable review (grams per item, whole-portion scale, redo with a correction) before anything is logged. A failed or unusable answer is shown as an error, never as an invented estimate. Uses a free Google Gemini key (aistudio.google.com/apikey) entered in Settings, or an Anthropic key if you set one.
+- **Weight log**: comma or point decimals, trend chart, synced with the food log.
 - **Storage**: everything stays on the device (localStorage). Use Export backup to keep a copy.
 
 ## Run locally
@@ -14,6 +17,12 @@ python3 -m http.server 8765
 ```
 
 Then open http://localhost:8765.
+
+## Tests
+
+With the local server running, open http://localhost:8765/tests/ in a browser. It runs the core logic tests and end-to-end checks of the app in an iframe (AI answers are mocked, so no key or cost). Your data for that origin is backed up and restored.
+
+`tests/ai-eval.html` measures real photo accuracy: pick your own photos, enter a reference (weighed or from a label), and run. It uses the key saved in the app on that browser and costs one AI request per photo.
 
 ## Publish on GitHub Pages
 
@@ -32,7 +41,7 @@ Open the link in Safari, tap Share, then **Add to Home Screen**.
 
 ## Updating
 
-Edit the files, then commit and push. Opening the app while online picks up the new version. If you change anything other than `index.html`, also bump `CACHE` in `sw.js`.
+Edit the files, then commit and push. Opening the app while online picks up the new version: the page, scripts and styles load network-first. Bump `CACHE` in `sw.js` when you add or rename files so the offline copy includes them.
 
 ## Refreshing the bundled data
 

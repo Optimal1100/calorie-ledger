@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photo estimate evaluation</title>
+<style>
+  body{font:15px/1.45 -apple-system,system-ui,sans-serif;margin:16px;max-width:1100px;color:#111}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:12px}th,td{border-bottom:1px solid #ddd;padding:6px;text-align:left;vertical-align:top}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}img{width:72px;height:72px;object-fit:cover;border-radius:8px}
+  input[type=number]{width:80px}.bad{color:#c0392b}.ok{color:#1d7a52}.sum{display:flex;gap:24px;flex-wrap:wrap;margin:12px 0;font-size:14px}.sum b{display:block;font-size:22px}
+</style>
+</head>
+<body>
+<h1>Photo estimate evaluation</h1>
+<p>Runs the app's real photo pipeline (same prompt, model order, validation and database grounding) on your own photos and compares each result with a reference you trust: a weighed meal or a nutrition label. It uses the AI key saved in the app on this browser, and every photo costs one request. Results stay on this page; download the CSV to keep them.</p>
+<p><input type="file" id="files" accept="image/*" multiple> <button id="go" disabled>Run</button> <button id="csv" disabled>Download CSV</button> <span id="status"></span></p>
+<p style="font-size:13px;color:#666">For each photo, enter the reference calories and what was in it, then Run. After the run, tick whether the foods were identified correctly; that separates recognition errors from portion and nutrition-data errors.</p>
+<div class="sum" id="sum"></div>
+<table><thead><tr><th>Photo</th><th>Reference kcal</th><th>Reference foods</th><th>Category</th><th>Predicted</th><th>Error</th><th>Foods right?</th><th>Components (grams · kcal/100 g · source)</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+import {aiJSON} from "../js/ai.js";
+import {MEAL_SCHEMA, mealPrompt, normalizeMeal, groundPart, mealTotals, fold} from "../js/core.js";
+const $ = id => document.getElementById(id), esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let keys = {}; try { keys = JSON.parse(localStorage.getItem("calorie-ledger-keys") || "{}"); } catch {}
+let cases = [], db = [];
+fetch("../data/livsmedel.json").then(r => r.json()).then(d => { const ix = Object.fromEntries(d.fields.map((k, i) => [k, i]));
+  db = d.foods.map(r => ({name: r[ix.sv], en: r[ix.en] || "", kcal: r[ix.kcal], p: r[ix.p] || 0, c: r[ix.c] || 0, f: r[ix.f] || 0, m: {fiber: r[ix.fiber]}, source: "Livsmedelsverket", key: fold(r[ix.sv] + " | " + r[ix.en])})); });
+$("status").textContent = keys.gemini || keys.anthropic ? "" : "No AI key found in this browser. Add one in the app's Settings first.";
+$("files").addEventListener("change", e => {
+  cases = [...e.target.files].map(file => ({file, url: URL.createObjectURL(file), ref: null, refFoods: "", cat: "mixed meal"}));
+  $("go").disabled = !cases.length || !(keys.gemini || keys.anthropic); draw();
+});
+function draw(){
+  $("rows").innerHTML = cases.map((c, i) => `<tr data-i="${i}"><td><img src="${c.url}" alt=""><br><small>${esc(c.file.name)}</small></td>
+    <td><input type="number" data-k="ref" value="${c.ref ?? ""}" min="0"></td><td><input data-k="refFoods" value="${esc(c.refFoods)}" placeholder="e.g. 150 g chicken, 200 g rice"></td>
+    <td><select data-k="cat">${["fruit/snack","packaged (label)","bowl/cereal","sandwich","mixed meal","restaurant plate","drink","ambiguous"].map(x => `<option ${x === c.cat ? "selected" : ""}>${x}</option>`).join("")}</select></td>
+    <td class="n">${c.status === "running" ? "…" : c.error ? `<span class="bad">${esc(c.error)}</span>` : c.pred != null ? c.pred : ""}</td>
+    <td class="n">${c.pred != null && c.ref ? `<span class="${Math.abs(c.pred - c.ref) / c.ref > 0.25 ? "bad" : "ok"}">${c.pred - c.ref > 0 ? "+" : ""}${Math.round((c.pred - c.ref) / c.ref * 100)}%</span>` : ""}</td>
+    <td>${c.pred != null ? `<select data-k="recog"><option value="">?</option><option ${c.recog === "yes" ? "selected" : ""}>yes</option><option ${c.recog === "partly" ? "selected" : ""}>partly</option><option ${c.recog === "no" ? "selected" : ""}>no</option></select>` : ""}</td>
+    <td>${c.meal ? `<b>${esc(c.meal.name)}</b> (${c.meal.confidence})<br>` + c.meal.parts.map(p => `${esc(p.name)}: ${p.grams} g · ${Math.round(p.per.kcal)} · ${esc(p.source)}`).join("<br>") : ""}</td></tr>`).join("");
+  summary();
+}
+$("rows").addEventListener("input", e => { const tr = e.target.closest("[data-i]"), k = e.target.dataset.k; if (!tr || !k) return;
+  cases[+tr.dataset.i][k] = k === "ref" ? (e.target.value === "" ? null : +e.target.value) : e.target.value; summary(); });
+$("rows").addEventListener("change", e => { if (e.target.dataset.k === "recog" || e.target.dataset.k === "cat") draw(); });
+$("go").addEventListener("click", async () => {
+  $("go").disabled = true;
+  for (const c of cases) {
+    c.status = "running"; c.error = null; draw();
+    try {
+      const raw = await aiJSON(c.file, mealPrompt({mode: "photo"}), MEAL_SCHEMA, {task: "meal", keys});
+      const r = normalizeMeal(raw);
+      if (!r.ok) { c.error = r.kind; c.pred = null; c.meal = null; }
+      else { r.meal.parts = r.meal.parts.map(p => groundPart(p, db)); c.meal = r.meal; c.pred = mealTotals(r.meal.parts).kcal; }
+    } catch (err) { c.error = err && (err.kind + (err.status ? " " + err.status : "")) || "error"; c.pred = null; }
+    c.status = "done"; draw();
+  }
+  $("go").disabled = false; $("csv").disabled = false;
+});
+function summary(){
+  const done = cases.filter(c => c.status === "done"), scored = done.filter(c => c.pred != null && c.ref > 0);
+  const errs = scored.map(c => Math.abs(c.pred - c.ref)), pct = scored.map(c => Math.abs(c.pred - c.ref) / c.ref);
+  const med = a => { const v = [...a].sort((x, y) => x - y); return v.length ? v[v.length >> 1] : 0; };
+  const preds = done.filter(c => c.pred != null).map(c => c.pred);
+  const band = preds.filter(p => p >= 450 && p <= 550).length, spread = preds.length > 1 ? Math.round(Math.sqrt(preds.reduce((a, p) => a + (p - preds.reduce((x, y) => x + y, 0) / preds.length) ** 2, 0) / preds.length)) : 0;
+  const recogWrong = scored.filter(c => c.recog === "no" || c.recog === "partly");
+  const portionOnly = scored.filter(c => c.recog === "yes");
+  $("sum").innerHTML = !done.length ? "" : [
+    ["Photos run", done.length], ["Failed / no estimate", done.filter(c => c.pred == null).length],
+    ["Mean abs error", scored.length ? Math.round(errs.reduce((a, b) => a + b, 0) / errs.length) + " kcal" : "–"],
+    ["Median abs % error", scored.length ? Math.round(med(pct) * 100) + "%" : "–"],
+    ["Within ±20%", scored.length ? `${scored.filter(c => Math.abs(c.pred - c.ref) / c.ref <= 0.2).length} / ${scored.length}` : "–"],
+    ["Estimates in 450–550 kcal", `${band} / ${preds.length}`], ["Spread of estimates (SD)", spread + " kcal"],
+    ["Median % error, foods identified right", portionOnly.length ? Math.round(med(portionOnly.map(c => Math.abs(c.pred - c.ref) / c.ref)) * 100) + "% (portion + data)" : "–"],
+    ["Recognition wrong or partial", recogWrong.length ? `${recogWrong.length} / ${scored.length}` : "–"]
+  ].map(([a, b]) => `<div>${a}<b>${b}</b></div>`).join("");
+}
+$("csv").addEventListener("click", () => {
+  const rows = [["file","category","reference_kcal","reference_foods","predicted_kcal","error_pct","foods_identified","confidence","components","error"]].concat(cases.map(c => [c.file.name, c.cat, c.ref ?? "", c.refFoods, c.pred ?? "",
+    c.pred != null && c.ref ? Math.round((c.pred - c.ref) / c.ref * 100) : "", c.recog || "", c.meal ? c.meal.confidence : "", c.meal ? c.meal.parts.map(p => `${p.name} ${p.grams}g`).join("; ") : "", c.error || ""]));
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"})); a.download = "photo-eval.csv"; a.click();
+});
+</script>
+</body>
+</html>
